@@ -21,6 +21,7 @@ export interface CTLog {
 export interface ParsedSCT extends SCT {
   log: CTLog | null
   logIdHex: string
+  logIdBase64: string
   timestampDate: Date
 }
 

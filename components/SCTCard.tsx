@@ -74,9 +74,13 @@ export default function SCTCard({ result, index, total }: Props) {
         </div>
 
         {/* SCT raw fields */}
-        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
+        <div className="mt-3 space-y-2 text-xs font-mono">
           <div>
-            <span className="text-slate-500">Log ID: </span>
+            <span className="text-slate-500">Log ID (base64): </span>
+            <span className="text-slate-300 break-all">{sct.logIdBase64}</span>
+          </div>
+          <div>
+            <span className="text-slate-500">Log ID (hex): </span>
             <span className="text-slate-300 break-all">{sct.logIdHex.slice(0, 32)}…</span>
           </div>
           <div>
