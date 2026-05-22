@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx create-next-app@latest . --typescript --tailwind --app --no-src-dir --no-import-alias --turbopack)",
+      "Bash(npm --version)",
+      "Read(//Users/itse/.nvm/versions/node/**)",
+      "Bash(command -v fnm)",
+      "Bash(brew list *)"
+    ]
+  }
+}
