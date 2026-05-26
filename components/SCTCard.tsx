@@ -17,6 +17,41 @@ interface Props {
   certDER: Uint8Array
 }
 
+/** Small inline badge indicating which CT protocol was used. */
+function ProtocolBadge({ label, title }: { label: string; title: string }) {
+  return (
+    <span
+      title={title}
+      className="inline-block font-mono text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded ml-1 leading-none"
+    >
+      {label}
+    </span>
+  )
+}
+
+/** Render STH and proof-source badges when the API type is known. */
+function ProtocolBadges({
+  sthApiType,
+  proofApiType,
+}: {
+  sthApiType?: 'rfc6962' | 'sunlight'
+  proofApiType?: 'rfc6962' | 'tiles'
+}) {
+  return (
+    <>
+      {sthApiType === 'sunlight' && (
+        <ProtocolBadge label="Sunlight ✓" title="Tree head obtained from RFC 9162 /checkpoint (Sunlight signed note)" />
+      )}
+      {sthApiType === 'rfc6962' && (
+        <ProtocolBadge label="RFC 6962 STH" title="Tree head obtained from ct/v1/get-sth" />
+      )}
+      {proofApiType === 'tiles' && (
+        <ProtocolBadge label="tile-proof" title="Audit path reconstructed from RFC 9162 hash tiles" />
+      )}
+    </>
+  )
+}
+
 export default function SCTCard({ result, index, total }: Props) {
   const { sct } = result
   const log = sct.log
@@ -59,9 +94,17 @@ export default function SCTCard({ result, index, total }: Props) {
               {log ? log.description : 'Unknown Log'}
             </h3>
             {log && (
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
                 {log.operator && <span>{log.operator} · </span>}
                 <span className={stateColour}>{state}</span>
+                {log.logType === 'tiled' && (
+                  <span
+                    title="Static CT API log (RFC 9162 / Sunlight) — uses checkpoint + tile-based verification"
+                    className="font-mono text-[10px] bg-sky-900/60 text-sky-300 border border-sky-700/50 px-1.5 py-0.5 rounded leading-none"
+                  >
+                    Sunlight
+                  </span>
+                )}
               </p>
             )}
           </div>
@@ -127,19 +170,29 @@ export default function SCTCard({ result, index, total }: Props) {
           )}
           {result.inclusionProof && (
             <>
-              <p>
-                Leaf {result.inclusionProof.leafIndex.toLocaleString()} of{' '}
-                {result.inclusionProof.treeSize.toLocaleString()} in the log&apos;s Merkle tree.
+              <p className="flex flex-wrap items-center gap-x-1">
+                <span>
+                  Leaf {result.inclusionProof.leafIndex.toLocaleString()} of{' '}
+                  {result.inclusionProof.treeSize.toLocaleString()} in the log&apos;s Merkle tree.
+                </span>
+                <ProtocolBadges
+                  sthApiType={result.inclusionProof.sthApiType}
+                  proofApiType={result.inclusionProof.proofApiType}
+                />
               </p>
               <div className="mt-1 font-mono text-xs space-y-0.5">
                 <div>
-                  <span className="text-slate-500">Leaf hash: </span>
+                  <span className="text-slate-500">Leaf hash:{'  '}</span>
                   <span className="text-slate-300 break-all">
                     {toHex(result.inclusionProof.leafHash).slice(0, 32)}…
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500">STH root:  </span>
+                  <span className="text-slate-500">
+                    {result.inclusionProof.sthApiType === 'sunlight'
+                      ? 'Checkpoint root:'
+                      : 'STH root:       '}
+                  </span>
                   <span className="text-slate-300 break-all">
                     {toHex(result.inclusionProof.rootHash).slice(0, 32)}…
                   </span>

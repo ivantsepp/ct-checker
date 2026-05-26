@@ -12,10 +12,19 @@ export interface CTLog {
   description: string
   logId: string
   key: string
+  /**
+   * For RFC 6962 logs: the log's HTTP API base URL.
+   * For tiled (RFC 9162) logs: the monitoring URL used for verification
+   * (checkpoint, tiles, backward-compat ct/v1/ endpoints).
+   */
   url: string
+  /** Only present for tiled logs: the URL CAs use to submit certificates. */
+  submissionUrl?: string
   state: Record<string, { timestamp: string } | undefined>
   temporalInterval?: { startInclusive: string; endExclusive: string }
   operator?: string
+  /** Distinguishes RFC 6962 logs from Static CT API / Sunlight tiled logs. */
+  logType?: 'rfc6962' | 'tiled'
 }
 
 export interface ParsedSCT extends SCT {
@@ -42,6 +51,10 @@ export interface InclusionProof {
   computedRoot: Uint8Array
   verified: boolean
   steps: InclusionStep[]
+  /** Which API provided the signed tree head (STH / checkpoint). */
+  sthApiType?: 'rfc6962' | 'sunlight'
+  /** How the audit path was obtained. */
+  proofApiType?: 'rfc6962' | 'tiles'
 }
 
 export interface SCTVerificationResult {

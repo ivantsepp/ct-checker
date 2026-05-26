@@ -88,6 +88,8 @@ export async function buildInclusionProof(
   treeSize: number,
   auditPath: Uint8Array[],
   rootHash: Uint8Array,
+  sthApiType?: 'rfc6962' | 'sunlight',
+  proofApiType?: 'rfc6962' | 'tiles',
 ): Promise<InclusionProof> {
   const lHash = await computeLeafHash(sct, certDER, entryType, issuerCertDER)
   const { verified, computedRoot, steps } = await verifyInclusionProof(
@@ -97,5 +99,16 @@ export async function buildInclusionProof(
     auditPath,
     rootHash,
   )
-  return { leafIndex, treeSize, auditPath, rootHash, leafHash: lHash, computedRoot, verified, steps }
+  return {
+    leafIndex,
+    treeSize,
+    auditPath,
+    rootHash,
+    leafHash: lHash,
+    computedRoot,
+    verified,
+    steps,
+    sthApiType,
+    proofApiType,
+  }
 }
