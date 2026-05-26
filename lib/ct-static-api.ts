@@ -199,15 +199,18 @@ export function parseHashTile(tileBytes: Uint8Array): Uint8Array[] {
 type TileCache = Map<string, Uint8Array[]>
 
 /**
- * Compute how many entries (nodes) exist at Sunlight tile level `tileLevel`
+ * Compute how many entries are stored at Sunlight tile level `tileLevel`
  * for a tree of `treeSize` leaves.
  *
- * Sunlight level L covers 256^L = 2^(L*8) leaves per entry.
- * Total entries at level L = ceil(treeSize / 2^(L*8))
+ * Sunlight tiles only store hashes of *complete* subtrees of 2^(L*8) leaves;
+ * the rightmost incomplete subtree (if any) is NOT represented at level L>0.
+ * (At L=0, every leaf is its own complete 1-leaf subtree, so all leaves count.)
+ *
+ *   entries at level L = floor(treeSize / 2^(L*8))
  */
 function entriesAtTileLevel(treeSize: number, tileLevel: number): number {
   const leavesPerEntry = Math.pow(2, tileLevel * TILE_HEIGHT)
-  return Math.ceil(treeSize / leavesPerEntry)
+  return Math.floor(treeSize / leavesPerEntry)
 }
 
 /**
@@ -260,14 +263,68 @@ async function nodeHash(left: Uint8Array, right: Uint8Array): Promise<Uint8Array
 }
 
 /**
- * Get the hash at a specific binary Merkle tree level and index,
- * reconstructing intermediate levels from Sunlight tile data as needed.
+ * Get the hash of the subtree rooted at (binaryLevel, index) — i.e.
+ * the Merkle Tree Hash of leaves [index*2^binaryLevel, min((index+1)*2^binaryLevel, treeSize)).
  *
- * Sunlight tiles store hashes at binary levels 0, 8, 16, … (multiples of
- * TILE_HEIGHT=8).  For binary levels in between, we fetch the appropriate
- * tile and build the sub-tree up locally.
+ * Complete subtrees are looked up from Sunlight hash tiles (directly when
+ * binaryLevel is a multiple of TILE_HEIGHT, otherwise by combining adjacent
+ * tile entries).  Partial right-edge subtrees — whose hashes are NOT stored
+ * in any tile — are computed via the RFC 6962 §2.1 recursive split.
  */
 export async function getHashAtBinaryLevel(
+  logUrl: string,
+  binaryLevel: number,
+  index: number,
+  treeSize: number,
+  cache: TileCache,
+): Promise<Uint8Array> {
+  const subtreeFull = Math.pow(2, binaryLevel)
+  const subtreeStart = index * subtreeFull
+  if (subtreeStart >= treeSize) {
+    throw new Error(
+      `Subtree (binaryLevel=${binaryLevel}, index=${index}) starts beyond treeSize=${treeSize}`,
+    )
+  }
+  const n = Math.min(subtreeFull, treeSize - subtreeStart)
+  return subtreeHash(logUrl, subtreeStart, n, treeSize, cache)
+}
+
+/**
+ * RFC 6962 Merkle Tree Hash of `n` consecutive leaves starting at index `start`.
+ *
+ * When the range is a complete, power-of-2, aligned subtree, its hash is
+ * served (directly or indirectly) by Sunlight hash tiles.  Otherwise we
+ * split at the largest power of 2 less than `n` (the RFC 6962 rule) and
+ * recurse — the left half is always complete, the right half may itself
+ * be partial.
+ */
+async function subtreeHash(
+  logUrl: string,
+  start: number,
+  n: number,
+  treeSize: number,
+  cache: TileCache,
+): Promise<Uint8Array> {
+  const isPow2 = n > 0 && (n & (n - 1)) === 0
+  const isAligned = isPow2 && start % n === 0
+  if (isAligned && start + n <= treeSize) {
+    // Complete, aligned subtree → tile lookup.
+    return getCompleteSubtreeHash(logUrl, Math.log2(n), start / n, treeSize, cache)
+  }
+
+  // Partial → RFC 6962 split: k = largest power of 2 with k < n.
+  let k = 1
+  while (k * 2 < n) k *= 2
+  const left = await subtreeHash(logUrl, start, k, treeSize, cache)
+  const right = await subtreeHash(logUrl, start + k, n - k, treeSize, cache)
+  return nodeHash(left, right)
+}
+
+/**
+ * Hash of a complete 2^binaryLevel-leaf subtree at the given index.
+ * Caller MUST guarantee the subtree is fully within the tree.
+ */
+async function getCompleteSubtreeHash(
   logUrl: string,
   binaryLevel: number,
   index: number,
@@ -278,66 +335,48 @@ export async function getHashAtBinaryLevel(
   const withinTile = binaryLevel % TILE_HEIGHT  // 0–7
 
   if (withinTile === 0) {
-    // Direct: this binary level is stored directly in a Sunlight tile.
+    // Stored directly in a Sunlight tile.
     const tileIdx = Math.floor(index / TILE_WIDTH)
     const offset = index % TILE_WIDTH
     const hashes = await getHashTile(logUrl, tileLevel, tileIdx, treeSize, cache)
     if (offset >= hashes.length) {
       throw new Error(
-        `Tile (level=${tileLevel}, idx=${tileIdx}) has ${hashes.length} entries; need offset ${offset}`,
+        `Complete subtree (binaryLevel=${binaryLevel}, index=${index}) missing ` +
+        `from tile ${tileLevel}/${tileIdx} (got ${hashes.length} entries)`,
       )
     }
     return hashes[offset]
   }
 
-  // Indirect: binary level is NOT stored in a tile; derive from tile-level nodes.
-  //
-  // The binary node at (binaryLevel, index) covers
-  //   2^binaryLevel leaves, starting at index * 2^binaryLevel.
-  //
-  // The corresponding tile-level entries (binary level = tileLevel*8) cover
-  //   2^(tileLevel*8) leaves each.
-  //
-  // Number of tile entries needed = 2^withinTile  (range: 2 to 128).
-  const lowerCount = 1 << withinTile
-  const lowerStart = index * lowerCount  // first tile-level position we need
-
-  // Collect the tile-level entries (they all fit within at most 2 tiles since
-  // lowerCount ≤ 128 < TILE_WIDTH=256).
+  // Combine 2^withinTile adjacent complete tile-level entries (binary level
+  // tileLevel*8).  Since the subtree is complete, all entries are stored.
+  const count = 1 << withinTile
+  const tileEntryStart = index * count
   const lowerHashes: Uint8Array[] = []
-  for (let j = 0; j < lowerCount; j++) {
-    const lowerIdx = lowerStart + j
+  for (let j = 0; j < count; j++) {
+    const lowerIdx = tileEntryStart + j
     const tileIdx = Math.floor(lowerIdx / TILE_WIDTH)
     const offset = lowerIdx % TILE_WIDTH
-
     const hashes = await getHashTile(logUrl, tileLevel, tileIdx, treeSize, cache)
-    if (offset < hashes.length) {
-      lowerHashes.push(hashes[offset])
+    if (offset >= hashes.length) {
+      throw new Error(
+        `Complete subtree at (binaryLevel=${binaryLevel}, index=${index}) needs ` +
+        `${count} tile-${tileLevel} entries from ${tileEntryStart}, but ` +
+        `tile/${tileLevel}/${tileIdx} has only ${hashes.length}`,
+      )
     }
-    // If offset is out of range, this subtree doesn't exist in the tree
-    // (right-edge of an incomplete tree).  We stop collecting here.
-    else break
+    lowerHashes.push(hashes[offset])
   }
 
-  if (lowerHashes.length === 0) {
-    throw new Error(`No tile entries found for binary (level=${binaryLevel}, index=${index})`)
-  }
-
-  // Build the binary Merkle sub-tree up withinTile levels.
+  // Pair-hash up `withinTile` levels — every level halves exactly.
   let current = lowerHashes
   for (let step = 0; step < withinTile; step++) {
-    if (current.length === 1) break  // already at the top of this sub-tree
     const next: Uint8Array[] = []
-    for (let k = 0; k < current.length - 1; k += 2) {
+    for (let k = 0; k < current.length; k += 2) {
       next.push(await nodeHash(current[k], current[k + 1]))
-    }
-    if (current.length % 2 === 1) {
-      // Odd node — promote without hashing (RFC 6962 §2.1 rule)
-      next.push(current[current.length - 1])
     }
     current = next
   }
-
   return current[0]
 }
 

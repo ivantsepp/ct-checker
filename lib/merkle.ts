@@ -52,6 +52,15 @@ export async function computeLeafHash(
   return leafHash(buildTimestampedEntryX509(sct, certDER))
 }
 
+/**
+ * Verify an inclusion proof per RFC 6962 §2.1.1.
+ *
+ * The audit path from a tree of arbitrary (non-power-of-2) size may *skip*
+ * levels where the leaf's ancestor has no sibling (it sits at the rightmost
+ * incomplete subtree boundary).  We track both the running node index (`fn`)
+ * and the rightmost-node index (`sn`) so we can detect those boundaries and
+ * shift up correctly.
+ */
 export async function verifyInclusionProof(
   lHash: Uint8Array,
   leafIndex: number,
@@ -60,19 +69,34 @@ export async function verifyInclusionProof(
   expectedRoot: Uint8Array,
 ): Promise<{ verified: boolean; computedRoot: Uint8Array; steps: InclusionStep[] }> {
   const steps: InclusionStep[] = []
-  let index = leafIndex
+  let fn = leafIndex
+  let sn = treeSize - 1
   let hash = lHash
 
-  for (let level = 0; level < auditPath.length; level++) {
-    const sibling = auditPath[level]
-    const siblingIsLeft = index % 2 !== 0
+  for (let i = 0; i < auditPath.length; i++) {
+    const sibling = auditPath[i]
+    // sibling is on the LEFT when our node is a right child (LSB(fn) set),
+    // OR when our node IS the rightmost partial subtree at this level (fn == sn).
+    const siblingIsLeft = (fn % 2 === 1) || fn === sn
     const parentHash = siblingIsLeft
       ? await nodeHash(sibling, hash)
       : await nodeHash(hash, sibling)
 
-    steps.push({ level, currentHash: hash, sibling, siblingIsLeft, parentHash })
+    steps.push({ level: i, currentHash: hash, sibling, siblingIsLeft, parentHash })
     hash = parentHash
-    index = Math.floor(index / 2)
+
+    // RFC 6962: if we paired via fn == sn (i.e., LSB(fn) was 0), shift fn and sn
+    // up together until LSB(fn) becomes 1 or fn reaches 0 — this skips the
+    // intermediate levels where the rightmost subtree had no sibling.
+    if (siblingIsLeft && fn % 2 === 0) {
+      while (fn % 2 === 0 && fn !== 0) {
+        fn = Math.floor(fn / 2)
+        sn = Math.floor(sn / 2)
+      }
+    }
+
+    fn = Math.floor(fn / 2)
+    sn = Math.floor(sn / 2)
   }
 
   const verified = hash.length === expectedRoot.length && hash.every((b, i) => b === expectedRoot[i])
