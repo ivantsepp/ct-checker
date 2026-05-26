@@ -5,7 +5,10 @@
       "Bash(npm --version)",
       "Read(//Users/itse/.nvm/versions/node/**)",
       "Bash(command -v fnm)",
-      "Bash(brew list *)"
+      "Bash(brew list *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git commit *)"
     ]
   }
 }
