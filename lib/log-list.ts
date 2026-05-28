@@ -1,5 +1,5 @@
 import type { CTLog, ParsedSCT, SCT } from '@/types/ct'
-import { toHex, toBase64, fromBase64 } from './sct-parser'
+import { toHex, toBase64, fromBase64, parseSCTExtensions } from './sct-parser'
 
 let cachedLogs: CTLog[] | null = null
 let cacheTime = 0
@@ -40,6 +40,7 @@ export function enrichSCT(sct: SCT, logs: CTLog[]): ParsedSCT {
     logIdHex: toHex(sct.logId),
     logIdBase64: toBase64(sct.logId),
     timestampDate: new Date(Number(sct.timestamp)),
+    parsedExtensions: parseSCTExtensions(sct.extensions),
   }
 }
 

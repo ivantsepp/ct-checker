@@ -16,7 +16,7 @@ A Next.js app that, given a domain, fetches its TLS certificate, parses the embe
   - `sct-verifier.ts` — verifies the SCT's ECDSA signature against the log's public key.
   - `log-list.ts` — wraps `/api/log-list` (cached Chrome v3 log_list.json).
   - `ct-api.ts` — `getSTH` and `getProofByHash`. Tries **RFC 6962** (`ct/v1/get-sth`, `ct/v1/get-proof-by-hash`) first, falls back to **Sunlight / static-ct-api** (RFC 9162).
-  - `ct-static-api.ts` — Sunlight tile fetching, checkpoint parsing, `findLeafIndex` (binary search over data tiles by SCT timestamp), `buildProofFromTiles`.
+  - `ct-static-api.ts` — Sunlight tile fetching, checkpoint parsing, `verifyLeafAtIndex` (1-fetch confirmation when the SCT carries the C2SP `leaf_index` extension), `findLeafIndex` (timestamp binary search — last-resort fallback), `buildProofFromTiles`.
   - `merkle.ts` — leaf-hash construction (x509 vs precert), `verifyInclusionProof` (RFC 6962 §2.1.1).
 - **`app/api/`** — server-side proxies; the browser can't reach CT logs directly.
   - `ct-proxy/` — forwards to a log URL. Validates the URL against the cached log list (open-redirect protection). Encodes responses as JSON, plain text (checkpoint), or `{ bytes: base64 }` (binary tiles) depending on the endpoint.
@@ -37,6 +37,7 @@ RFC 6962 logs serve JSON via `ct/v1/*`. Sunlight / static-ct-api logs serve a si
 - **Leaf hash = `SHA-256(0x00 || version=0x00 || leaf_type=0x00 || TimestampedEntry)`.** The three prefix bytes are part of the hash input (RFC 6962). Pre-certs use a different `TimestampedEntry` payload (issuer key hash + TBS) built in `lib/precert.ts`.
 - **Sunlight data tiles use the `TileLeaf` framing**, which is RFC 6962's `TimestampedEntry` followed by (for precerts) the original pre-cert, then a `Fingerprint chain<0..2^16-1>`. The leaf hash is computed over only the `TimestampedEntry` slice — `parseDataTile` returns that slice as `timestampedEntryBytes`.
 - **Tile URL format** — every path segment except the last is prefixed with `x` and zero-padded to 3 digits (e.g. `tile/3/x001/234`). Partial tiles append `.p/<width>` (`1 ≤ width < 256`).
+- **Static-ct-api SCTs carry a `leaf_index` extension** (TLS extension type 0, uint40 BE) inside the SCT's CtExtensions blob. `parseSCTExtensions` in `lib/sct-parser.ts` decodes it; `verifyLeafAtIndex` confirms it with a single data-tile fetch. Skipping this and binary-searching by timestamp instead costs ~log2(treeSize/256) extra fetches (~20 for a billion-leaf log).
 
 ## Running
 

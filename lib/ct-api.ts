@@ -1,5 +1,10 @@
 import { fromBase64 } from './sct-parser'
-import { getSTHFromCheckpoint, buildProofFromTiles, findLeafIndex } from './ct-static-api'
+import {
+  getSTHFromCheckpoint,
+  buildProofFromTiles,
+  findLeafIndex,
+  verifyLeafAtIndex,
+} from './ct-static-api'
 
 export interface STH {
   treeSize: number
@@ -63,17 +68,23 @@ export async function getSTH(logUrl: string): Promise<STH> {
  *
  * Tries RFC 6962 `ct/v1/get-proof-by-hash` first.  If that fails (e.g. a
  * Sunlight-only log that doesn't implement the compat endpoint), we fall back
- * to discovering the leaf index via a binary search over the log's data tiles
- * and then reconstructing the audit path from hash tiles.
+ * to reconstructing the audit path from hash tiles.  The leaf index for the
+ * tile path is sourced in order of preference:
  *
- * @param sctTimestamp  SCT timestamp in milliseconds (bigint), used as the
- *                      binary-search key for data-tile leaf discovery.
+ *   1. `knownLeafIndex` — from the SCT's C2SP static-ct-api `leaf_index`
+ *      extension.  Costs ONE data-tile fetch to confirm.
+ *   2. Binary search over data tiles by timestamp (~log2(treeSize/256) fetches).
+ *
+ * @param sctTimestamp    SCT timestamp in milliseconds (bigint).  Used only
+ *                        if `knownLeafIndex` is absent or doesn't verify.
+ * @param knownLeafIndex  Leaf index from the SCT extensions, if present.
  */
 export async function getProofByHash(
   logUrl: string,
   leafHash: Uint8Array,
   treeSize: number,
   sctTimestamp?: bigint,
+  knownLeafIndex?: number,
 ): Promise<CTProofResponse> {
   // ── RFC 6962 path ─────────────────────────────────────────────────────────
   try {
@@ -89,15 +100,27 @@ export async function getProofByHash(
     }
   } catch {
     // ── Sunlight / tile-based fallback ────────────────────────────────────────
-    if (sctTimestamp === undefined) {
-      throw new Error(
-        'Log does not support ct/v1/get-proof-by-hash; ' +
-        'cannot fall back to tile-based proof without the SCT timestamp',
-      )
+    let leafIndex: number | null = null
+
+    // Step 1a: if the SCT carries a leaf_index extension, confirm it with one
+    //          fetch and use it directly — this skips ~log2(N/256) data-tile
+    //          probes from the binary search.
+    if (knownLeafIndex !== undefined) {
+      leafIndex = await verifyLeafAtIndex(logUrl, knownLeafIndex, leafHash, treeSize)
     }
-    // Step 1: find the leaf index by binary-searching data tiles on timestamp,
-    //         then confirming with a leaf-hash comparison.
-    const leafIndex = await findLeafIndex(logUrl, sctTimestamp, leafHash, treeSize)
+
+    // Step 1b: fall back to timestamp-based binary search if the extension
+    //          was absent or didn't verify (forged / stale / wrong log).
+    if (leafIndex === null) {
+      if (sctTimestamp === undefined) {
+        throw new Error(
+          'Log does not support ct/v1/get-proof-by-hash and no usable ' +
+          'leaf_index extension or SCT timestamp was provided',
+        )
+      }
+      leafIndex = await findLeafIndex(logUrl, sctTimestamp, leafHash, treeSize)
+    }
+
     // Step 2: reconstruct the audit path from hash tiles.
     const auditPath = await buildProofFromTiles(logUrl, leafIndex, treeSize)
     return { leafIndex, auditPath, proofApiType: 'tiles' }

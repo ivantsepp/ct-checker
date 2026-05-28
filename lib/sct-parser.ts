@@ -64,6 +64,48 @@ export function parseSCT(bytes: Uint8Array): SCT {
   return { version, logId, timestamp, extensions, hashAlgorithm, sigAlgorithm, signature }
 }
 
+/**
+ * Decoded fields from an SCT's `CtExtensions` blob.
+ *
+ * The wire format is a TLS extension list:
+ *
+ *   struct {
+ *     uint8  extension_type;
+ *     uint16 extension_data_length;
+ *     opaque extension_data[extension_data_length];
+ *   } Extension;
+ *
+ * Only one type is currently defined by C2SP static-ct-api:
+ *   - type 0 = leaf_index: uint40 BE giving the 0-based position of this
+ *     entry in the log's Merkle tree.  Lets verifiers skip the binary
+ *     search over data tiles when locating the leaf.
+ *
+ * RFC 6962 (non-Sunlight) SCTs typically have an empty extensions blob.
+ */
+export interface SCTExtensionData {
+  leafIndex?: number
+}
+
+export function parseSCTExtensions(bytes: Uint8Array): SCTExtensionData {
+  const result: SCTExtensionData = {}
+  let off = 0
+  while (off + 3 <= bytes.length) {
+    const extType = bytes[off]
+    const extLen = readUint16BE(bytes, off + 1)
+    off += 3
+    if (off + extLen > bytes.length) break  // truncated; bail
+
+    if (extType === 0 && extLen === 5) {
+      // uint40 BE leaf_index — JS Number safely represents up to 2^53.
+      let idx = 0
+      for (let i = 0; i < 5; i++) idx = idx * 256 + bytes[off + i]
+      result.leafIndex = idx
+    }
+    off += extLen
+  }
+  return result
+}
+
 export function toHex(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))

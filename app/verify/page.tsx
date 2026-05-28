@@ -237,7 +237,13 @@ function VerifyInner() {
               )
               if (cancelled) return
 
-              const proof = await getProofByHash(logUrl, lHash, sth.treeSize, sct.timestamp)
+              const proof = await getProofByHash(
+                logUrl,
+                lHash,
+                sth.treeSize,
+                sct.timestamp,
+                sct.parsedExtensions.leafIndex,
+              )
               if (cancelled) return
 
               const inclusion = await buildInclusionProof(

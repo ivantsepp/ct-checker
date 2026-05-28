@@ -517,6 +517,33 @@ async function fetchDataTile(
 }
 
 /**
+ * Confirm that the entry at `leafIdx` matches the expected leaf hash.
+ * Used when the SCT's leaf_index extension (C2SP static-ct-api §"Extensions")
+ * tells us the index up front — we still fetch ONE data tile to verify the
+ * hash matches what we computed from the cert, so a forged or stale
+ * extension can't slip past us.
+ *
+ * Returns the index if it matches, or null on mismatch / out-of-range
+ * (caller can fall back to the timestamp-based binary search).
+ */
+export async function verifyLeafAtIndex(
+  logUrl: string,
+  leafIdx: number,
+  targetLeafHash: Uint8Array,
+  treeSize: number,
+): Promise<number | null> {
+  if (leafIdx < 0 || leafIdx >= treeSize) return null
+  const tileIdx = Math.floor(leafIdx / TILE_WIDTH)
+  const offset = leafIdx % TILE_WIDTH
+  const entries = await fetchDataTile(logUrl, tileIdx, treeSize)
+  if (offset >= entries.length) return null
+  const hash = await dataEntryLeafHash(entries[offset].timestampedEntryBytes)
+  const match = hash.length === targetLeafHash.length &&
+    hash.every((b, i) => b === targetLeafHash[i])
+  return match ? leafIdx : null
+}
+
+/**
  * Binary-search data tiles to find the leaf index matching a given SCT.
  *
  * CT log timestamps are generally monotonically non-decreasing, so we can

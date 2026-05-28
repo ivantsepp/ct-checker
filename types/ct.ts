@@ -27,11 +27,15 @@ export interface CTLog {
   logType?: 'rfc6962' | 'tiled'
 }
 
+import type { SCTExtensionData } from '@/lib/sct-parser'
+
 export interface ParsedSCT extends SCT {
   log: CTLog | null
   logIdHex: string
   logIdBase64: string
   timestampDate: Date
+  /** Decoded SCT extension list — notably leaf_index for static-ct-api logs. */
+  parsedExtensions: SCTExtensionData
 }
 
 export interface InclusionStep {
