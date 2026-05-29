@@ -10,6 +10,7 @@ import { verifySCTSignature } from '@/lib/sct-verifier'
 import { getSTH, getProofByHash } from '@/lib/ct-api'
 import { buildInclusionProof } from '@/lib/merkle'
 import { toHex } from '@/lib/sct-parser'
+import { IS_STATIC_BUILD, CORSError } from '@/lib/transport'
 import SCTCard from '@/components/SCTCard'
 
 type Phase =
@@ -27,6 +28,13 @@ interface State {
   parsedCert?: ParsedCert
   scts: ParsedSCT[]
   results: SCTVerificationResult[]
+  /**
+   * Set when we hit at least one CORS / network failure talking directly to
+   * a CT log.  Only meaningful in the static build (frontend-only).  Triggers
+   * an informational banner so the user knows it's an environment limit,
+   * not a verification failure.
+   */
+  corsHit?: boolean
 }
 
 function CertInfoCard({ cert }: { cert: ParsedCert }) {
@@ -153,6 +161,12 @@ function VerifyInner() {
         let issuerCertDER: Uint8Array | null = null
 
         if (domainParam) {
+          if (IS_STATIC_BUILD) {
+            throw new Error(
+              'Domain lookup is not available in the static (GitHub Pages) build — ' +
+              'the browser cannot open a TLS socket. Go back and paste the certificate instead.',
+            )
+          }
           const res = await fetch(`/api/fetch-cert?domain=${encodeURIComponent(domainParam)}`)
           const data = await res.json()
           if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`)
@@ -263,6 +277,9 @@ function VerifyInner() {
               updateResult(i, { inclusionProof: inclusion })
             } catch (e) {
               if (!cancelled) {
+                if (e instanceof CORSError) {
+                  setState((s) => ({ ...s, corsHit: true }))
+                }
                 updateResult(i, { inclusionError: String(e) })
               }
             }
@@ -272,7 +289,12 @@ function VerifyInner() {
         if (!cancelled) setState((s) => ({ ...s, phase: 'done' }))
       } catch (e) {
         if (!cancelled) {
-          setState((s) => ({ ...s, phase: 'error', error: String(e) }))
+          setState((s) => ({
+            ...s,
+            phase: 'error',
+            error: String(e),
+            corsHit: s.corsHit || e instanceof CORSError,
+          }))
         }
       }
     }
@@ -310,6 +332,22 @@ function VerifyInner() {
           <div className="bg-red-900/20 border border-red-700/50 rounded-xl p-5">
             <p className="text-red-300 font-semibold mb-1">Verification failed</p>
             <p className="text-red-400 text-sm font-mono">{state.error}</p>
+          </div>
+        )}
+
+        {/* CORS / direct-fetch banner (static build only) */}
+        {state.corsHit && (
+          <div className="bg-amber-900/20 border border-amber-700/50 rounded-xl p-5">
+            <p className="text-amber-200 font-semibold mb-1">
+              One or more CT logs blocked direct browser access
+            </p>
+            <p className="text-amber-300/90 text-sm leading-relaxed">
+              This is the frontend-only build (no server-side proxy). The browser
+              fetches each log directly, and some logs do not serve CORS headers —
+              the inclusion proof can&apos;t be reconstructed without server help.
+              SCT signatures still verify locally. To verify inclusion against
+              these logs, run <span className="font-mono text-amber-200">npm run dev</span> locally.
+            </p>
           </div>
         )}
 

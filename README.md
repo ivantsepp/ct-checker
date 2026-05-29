@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CT Inclusion-Proof Checker
 
-## Getting Started
+A Next.js app that, given a domain or pasted certificate, parses the embedded
+SCTs, verifies each ECDSA signature against the Chrome CT log list, then
+reconstructs and verifies the RFC 6962 Merkle inclusion proof end-to-end.
 
-First, run the development server:
+## Two build modes
+
+The same codebase supports two deployments:
+
+### Dynamic (full features)
+
+Runs as a normal Next.js app with server-side route handlers under `app/api/`:
+
+- `/api/fetch-cert` — opens a TLS socket to `<domain>:443` to fetch the leaf cert.
+- `/api/ct-proxy` — forwards browser requests to CT logs, sidestepping CORS.
+- `/api/log-list` — cached proxy for the Chrome v3 log list.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev      # Next.js dev server on http://localhost:3000
+npm run build    # Production build with API routes
+npm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Static (frontend-only, GitHub Pages)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+A fully static build that runs in the browser only — no proxy, no TLS socket.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build:static       # produces ./out/
+```
 
-## Learn More
+In this mode:
 
-To learn more about Next.js, take a look at the following resources:
+- **Domain input is hidden** — the browser cannot open a TLS socket to port 443.
+  Users must paste a certificate (PEM or base64 DER).
+- **CT log fetches go directly from the browser to each log.** Most major logs
+  (Google, Cloudflare, Sectigo) serve `Access-Control-Allow-Origin: *`, but
+  some do not — those fail with a `CORSError` and are surfaced in the UI as an
+  informational banner. SCT signature verification still works locally; only
+  inclusion-proof reconstruction is affected.
+- The Chrome log list is fetched directly from `gstatic.com` (CORS-enabled).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+#### Deploy to GitHub Pages
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+A workflow is included at [.github/workflows/deploy.yml](.github/workflows/deploy.yml):
 
-## Deploy on Vercel
+1. In repo settings, enable **Pages → Build and deployment → GitHub Actions**.
+2. Push to `main`. The workflow builds with `NEXT_PUBLIC_BASE_PATH=/<repo>` and
+   uploads `out/` as the Pages artifact.
+3. For a custom domain (served at `/`), set `NEXT_PUBLIC_BASE_PATH` to an empty
+   string in the workflow.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Architecture
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See [AGENTS.md](AGENTS.md) for the protocol-level invariants (RFC 6962 §2.1.1
+skipping, Sunlight tile structure, leaf-hash framing, etc.) you must respect
+when modifying `lib/`.
+
+Build-mode switching:
+
+- `process.env.NEXT_PUBLIC_STATIC_BUILD === '1'` toggles all client-side code
+  paths via `IS_STATIC_BUILD` in [lib/transport.ts](lib/transport.ts).
+- [next.config.ts](next.config.ts) strips `api.ts` from `pageExtensions` in
+  static builds so route handlers (named `route.api.ts`) aren't discovered.
+
+## Lint / scripts
+
+```bash
+npm run lint
+node test-e2e.mjs        # ad-hoc end-to-end smoke test (Node-only)
+node debug-sig.mjs       # ad-hoc signature debugging script
+```

@@ -1,4 +1,5 @@
 import { fromBase64 } from './sct-parser'
+import { ctFetch } from './transport'
 import {
   getSTHFromCheckpoint,
   buildProofFromTiles,
@@ -22,14 +23,8 @@ export interface CTProofResponse {
 }
 
 async function ctGet(logUrl: string, path: string, params?: Record<string, string>): Promise<unknown> {
-  const qs = params ? '&' + new URLSearchParams(params).toString() : ''
-  const url = `/api/ct-proxy?logUrl=${encodeURIComponent(logUrl)}&endpoint=${encodeURIComponent(path)}${qs}`
-  const res = await fetch(url)
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`CT API ${res.status}: ${body}`)
-  }
-  return res.json()
+  const { json } = await ctFetch(logUrl, path, params)
+  return json
 }
 
 /**

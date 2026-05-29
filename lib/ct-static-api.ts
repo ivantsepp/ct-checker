@@ -19,7 +19,8 @@
  */
 
 import type { STH } from './ct-api'
-import { fromBase64, concat } from './sct-parser'
+import { concat, fromBase64 } from './sct-parser'
+import { ctFetch } from './transport'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -140,27 +141,15 @@ export function dataTilePath(n: number, width?: number): string {
   return width !== undefined && width < TILE_WIDTH ? `${base}.p/${width}` : base
 }
 
-// ── Proxy helpers ─────────────────────────────────────────────────────────────
-
-async function proxyFetch(logUrl: string, endpoint: string): Promise<Response> {
-  const url = `/api/ct-proxy?logUrl=${encodeURIComponent(logUrl)}&endpoint=${encodeURIComponent(endpoint)}`
-  const res = await fetch(url)
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new Error(`CT proxy ${res.status} for ${endpoint}: ${body.slice(0, 200)}`)
-  }
-  return res
-}
+// ── Log endpoint fetches ──────────────────────────────────────────────────────
 
 /**
  * Fetch the signed-note checkpoint for a Sunlight log.
  */
 export async function getCheckpoint(logUrl: string): Promise<Checkpoint> {
-  const res = await proxyFetch(logUrl, 'checkpoint')
-  const data = (await res.json()) as { text?: string; error?: string }
-  if (data.error) throw new Error(data.error)
-  if (!data.text) throw new Error('No text in checkpoint response')
-  return parseCheckpoint(data.text)
+  const { text } = await ctFetch(logUrl, 'checkpoint')
+  if (!text) throw new Error('No text in checkpoint response')
+  return parseCheckpoint(text)
 }
 
 /**
@@ -173,14 +162,11 @@ export async function getSTHFromCheckpoint(logUrl: string): Promise<STH & { apiT
 
 /**
  * Fetch raw bytes from a tile endpoint (hash or data tile).
- * The ct-proxy returns binary tiles as { bytes: "<base64>" }.
  */
 export async function fetchTileBytes(logUrl: string, tilePath: string): Promise<Uint8Array> {
-  const res = await proxyFetch(logUrl, tilePath)
-  const data = (await res.json()) as { bytes?: string; error?: string }
-  if (data.error) throw new Error(data.error)
-  if (!data.bytes) throw new Error(`No bytes in tile response for ${tilePath}`)
-  return fromBase64(data.bytes)
+  const { bytes } = await ctFetch(logUrl, tilePath)
+  if (!bytes) throw new Error(`No bytes in tile response for ${tilePath}`)
+  return bytes
 }
 
 /**

@@ -6,6 +6,16 @@
       "runtimeExecutable": "/Users/itse/.nvm/versions/node/v23.4.0/bin/node",
       "runtimeArgs": ["node_modules/.bin/next", "dev"],
       "port": 3000,
+      "autoPort": true,
+      "env": {
+        "NODE_OPTIONS": ""
+      }
+    },
+    {
+      "name": "ct-verifier-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5050", "--directory", "out"],
+      "port": 5050,
       "autoPort": true
     }
   ]
