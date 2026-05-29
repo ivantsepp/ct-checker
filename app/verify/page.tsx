@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import type { ParsedCert, ParsedSCT, SCTVerificationResult } from '@/types/ct'
-import { normalizeCertInput, parseCert } from '@/lib/cert-parser'
+import { normalizeCertChainInput, parseCert } from '@/lib/cert-parser'
+import { fetchIssuerFromAIA } from '@/lib/aia-fetch'
 import { parseSCTList } from '@/lib/sct-parser'
 import { getLogList, enrichSCT } from '@/lib/log-list'
 import { verifySCTSignature } from '@/lib/sct-verifier'
@@ -176,7 +177,21 @@ function VerifyInner() {
           }
         } else {
           const raw = atob(certParam!)
-          certDER = normalizeCertInput(raw)
+          const chain = normalizeCertChainInput(raw)
+          certDER = chain[0]
+          // If the user pasted a chain (leaf + issuer), the second cert is the
+          // issuer — needed to compute issuer_key_hash for precert SCT
+          // verification.  Fall back to fetching from the leaf's AIA caIssuers
+          // URL if only the leaf was pasted.
+          if (chain.length > 1) {
+            issuerCertDER = chain[1]
+          } else {
+            try {
+              issuerCertDER = await fetchIssuerFromAIA(certDER)
+            } catch {
+              // Leave issuerCertDER null; verifier will report a clearer error.
+            }
+          }
         }
 
         if (cancelled) return

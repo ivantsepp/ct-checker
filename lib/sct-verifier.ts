@@ -135,7 +135,17 @@ export async function verifySCTSignature(
       rawSig.slice(),
       x509Blob.slice(),
     )
-    return { valid, entryType: 'x509_entry', signedBlobHex: toHex(x509Blob) }
+    if (valid) return { valid: true, entryType: 'x509_entry', signedBlobHex: toHex(x509Blob) }
+    // Neither precert_entry (if attempted) nor x509_entry matched.  The most
+    // likely cause for a modern cert is a missing issuer — almost every leaf
+    // cert today is logged as a precertificate, and rebuilding that requires
+    // the issuer's SPKI for `issuer_key_hash`.
+    const hint = issuerCertDER
+      ? 'Signature does not match either precert_entry or x509_entry framing.'
+      : 'No issuer certificate available, so precert_entry verification was skipped ' +
+        'and x509_entry framing did not match. Paste the full PEM chain (leaf + issuer) ' +
+        'and try again.'
+    return { valid: false, entryType: 'x509_entry', signedBlobHex: toHex(x509Blob), error: hint }
   } catch (e) {
     return { valid: false, entryType: 'unknown', signedBlobHex: toHex(x509Blob), error: String(e) }
   }

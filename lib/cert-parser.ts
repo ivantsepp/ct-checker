@@ -17,10 +17,31 @@ export function pemToDer(pem: string): Uint8Array {
 }
 
 export function normalizeCertInput(input: string): Uint8Array {
+  // Backwards-compatible wrapper that returns only the first (leaf) cert.
+  return normalizeCertChainInput(input)[0]
+}
+
+/**
+ * Parse a paste-cert input into one or more DER certificates.
+ * Accepts:
+ *   - A single PEM `-----BEGIN CERTIFICATE-----` block
+ *   - A PEM bundle (chain) with multiple blocks — leaf first, then issuer(s)
+ *   - A single base64-encoded DER blob
+ *
+ * Returns `[leaf, issuer?, ...]`.  Callers that need an issuer for precert
+ * SCT verification should use the second element when present.
+ */
+export function normalizeCertChainInput(input: string): Uint8Array[] {
   input = input.trim()
 
-  if (input.startsWith('-----BEGIN')) {
-    return pemToDer(input)
+  if (input.includes('-----BEGIN CERTIFICATE-----')) {
+    const blocks = input.match(
+      /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g,
+    )
+    if (!blocks || blocks.length === 0) {
+      throw new Error('No complete PEM blocks found in input.')
+    }
+    return blocks.map(pemToDer)
   }
 
   try {
@@ -28,12 +49,12 @@ export function normalizeCertInput(input: string): Uint8Array {
     const binary = atob(clean)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    if (bytes[0] === 0x30) return bytes
+    if (bytes[0] === 0x30) return [bytes]
   } catch {
     // fall through
   }
 
-  throw new Error('Invalid certificate. Paste a PEM block or base64-encoded DER.')
+  throw new Error('Invalid certificate. Paste a PEM block, a PEM chain, or base64-encoded DER.')
 }
 
 function getStringAttr(typesAndValues: unknown[], oid: string): string {

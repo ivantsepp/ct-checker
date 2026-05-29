@@ -81,11 +81,19 @@ export default function Home() {
               </div>
             )}
             {IS_STATIC_BUILD && (
-              <div className="mb-5 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2">
-                This is the frontend-only build hosted on GitHub Pages.
-                Domain lookup is disabled (no TLS socket from the browser).
-                Paste a certificate to verify it. Some CT logs may also block
-                direct browser fetches — those will show as CORS errors.
+              <div className="mb-5 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2 leading-relaxed">
+                <p className="mb-1">
+                  This is the frontend-only build hosted on GitHub Pages.
+                  Domain lookup is disabled (no TLS socket from the browser).
+                </p>
+                <p className="mb-1">
+                  Paste the leaf certificate <em>and</em> its issuer (as a PEM
+                  chain) for full SCT signature verification — without the
+                  issuer, the precert hash can&apos;t be reconstructed. The app
+                  will try to fetch the issuer automatically from the cert&apos;s
+                  AIA extension, but many CA endpoints block this from the browser.
+                </p>
+                <p>Some CT logs also block direct browser fetches — those will show as CORS errors.</p>
               </div>
             )}
 
@@ -110,13 +118,13 @@ export default function Home() {
               ) : (
                 <div>
                   <label className="block text-xs text-slate-400 mb-1.5 font-medium">
-                    Certificate (PEM or base64 DER)
+                    Certificate (PEM, PEM chain, or base64 DER)
                   </label>
                   <textarea
                     value={cert}
                     onChange={(e) => setCert(e.target.value)}
-                    placeholder={'-----BEGIN CERTIFICATE-----\nMIIE…\n-----END CERTIFICATE-----'}
-                    rows={7}
+                    placeholder={'-----BEGIN CERTIFICATE-----\nMIIE…  (leaf)\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nMIIF…  (issuer — needed for SCT precert verify)\n-----END CERTIFICATE-----'}
+                    rows={9}
                     className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 font-mono text-xs focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 transition-colors resize-none"
                   />
                 </div>

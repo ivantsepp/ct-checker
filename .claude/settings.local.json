@@ -11,7 +11,11 @@
       "Bash(git commit *)",
       "Bash(git mv *)",
       "Bash(npm run *)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(openssl x509 *)",
+      "Read(//tmp/**)",
+      "Bash(cat /tmp/r13.pem)",
+      "Bash(cp /tmp/chain_b64.txt /Users/itse/Desktop/transparency_certs/app-checker/out/chain_b64.txt)"
     ]
   }
 }
