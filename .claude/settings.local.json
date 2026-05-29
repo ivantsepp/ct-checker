@@ -15,7 +15,8 @@
       "Bash(openssl x509 *)",
       "Read(//tmp/**)",
       "Bash(cat /tmp/r13.pem)",
-      "Bash(cp /tmp/chain_b64.txt /Users/itse/Desktop/transparency_certs/app-checker/out/chain_b64.txt)"
+      "Bash(cp /tmp/chain_b64.txt /Users/itse/Desktop/transparency_certs/ct-checker/out/chain_b64.txt)",
+      "Bash(git -C /Users/itse/Desktop/transparency_certs/ct-checker remote -v)"
     ]
   }
 }

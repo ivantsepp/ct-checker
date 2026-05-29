@@ -13,7 +13,7 @@ import type { NextConfig } from 'next'
  *     route handlers (which read `Request` and would break static export).
  *
  * For GitHub Pages, set `NEXT_PUBLIC_BASE_PATH` to the repo's URL path
- * (e.g. `/app-checker`) so asset URLs resolve correctly.
+ * (e.g. `/ct-checker`) so asset URLs resolve correctly.
  */
 const isStatic = process.env.NEXT_PUBLIC_STATIC_BUILD === '1'
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? ''
