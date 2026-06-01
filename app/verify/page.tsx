@@ -13,6 +13,7 @@ import { buildInclusionProof } from '@/lib/merkle'
 import { toHex } from '@/lib/sct-parser'
 import { IS_STATIC_BUILD, CORSError } from '@/lib/transport'
 import SCTCard from '@/components/SCTCard'
+import ThemeToggle from '@/components/ThemeToggle'
 
 type Phase =
   | 'fetching-cert'
@@ -335,6 +336,7 @@ function VerifyInner() {
           <span className="text-slate-600">|</span>
           <span className="text-emerald-400 font-mono text-lg font-bold">CT</span>
           <span className="text-slate-400 font-mono text-sm truncate max-w-sm">{title}</span>
+          <ThemeToggle />
         </div>
       </header>
 

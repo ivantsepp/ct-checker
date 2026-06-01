@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { IS_STATIC_BUILD } from '@/lib/transport'
+import ThemeToggle from '@/components/ThemeToggle'
 
 export default function Home() {
   const router = useRouter()
@@ -35,6 +36,7 @@ export default function Home() {
         <div className="max-w-4xl mx-auto flex items-center gap-3">
           <span className="text-emerald-400 font-mono text-lg font-bold">CT</span>
           <span className="text-slate-200 font-semibold">Certificate Transparency Verifier</span>
+          <ThemeToggle />
         </div>
       </header>
 

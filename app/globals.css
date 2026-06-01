@@ -3,6 +3,7 @@
 :root {
   --background: #020817;
   --foreground: #f1f5f9;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -15,4 +16,64 @@
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+/*
+ * Light theme.
+ *
+ * The whole UI was authored dark-first with explicit `slate-*` (neutral) and
+ * `emerald/red/amber/sky` (accent) Tailwind classes. In Tailwind v4 those
+ * utilities compile to `var(--color-<name>-<shade>)` references (opacity
+ * modifiers go through `color-mix(... var(--color-...) ...)`), so we can flip
+ * the entire palette at runtime by overriding the relevant color variables on
+ * `:root.light` — no component class changes needed.
+ *
+ * Neutrals: the slate ramp is mirrored (dark shade values for the light shade
+ * slots), so dark text becomes light backgrounds and vice-versa.
+ * Accents: only the shades used as *text-on-light* or *opaque tint backgrounds*
+ * are darkened/lightened so they stay legible against a light surface. Shades
+ * used purely for faint tints / focus rings (emerald-500, red-500, amber-500)
+ * keep their defaults.
+ */
+:root.light {
+  color-scheme: light;
+  --background: #f1f5f9;
+  --foreground: #0f172a;
+
+  /* Neutral ramp — mirrored */
+  --color-slate-50: #020617;
+  --color-slate-100: #0f172a;
+  --color-slate-200: #1e293b;
+  --color-slate-300: #334155;
+  --color-slate-400: #475569;
+  --color-slate-500: #64748b;
+  --color-slate-600: #cbd5e1;
+  --color-slate-700: #e2e8f0;
+  --color-slate-800: #f1f5f9;
+  --color-slate-900: #ffffff;
+  --color-slate-950: #f1f5f9;
+
+  /* Accent: emerald */
+  --color-emerald-300: #047857; /* text on faint tint */
+  --color-emerald-400: #059669; /* status text, checks */
+  /* emerald-500/600 kept: tints, focus ring, solid button */
+
+  /* Accent: red */
+  --color-red-300: #b91c1c; /* text on tint / error box */
+  --color-red-400: #dc2626; /* error text, ✗ */
+  --color-red-900: #fecaca; /* error-box tint background */
+  /* red-500 (tints) and red-700 (border) kept */
+
+  /* Accent: amber */
+  --color-amber-200: #92400e; /* strong text */
+  --color-amber-300: #b45309; /* text on tint */
+  --color-amber-400: #d97706; /* icons / text */
+  --color-amber-900: #fde68a; /* banner tint background */
+  /* amber-500 (tints) and amber-700 (border) kept */
+
+  /* Accent: sky */
+  --color-sky-300: #0369a1; /* text on tint */
+  --color-sky-400: #0284c7; /* path highlight text */
+  --color-sky-900: #e0f2fe; /* "Sunlight" badge tint background */
+  /* sky-700 (border) kept */
 }
