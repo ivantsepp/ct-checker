@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:static": "NEXT_PUBLIC_STATIC_BUILD=1 next dev",
     "build": "next build",
     "build:static": "NEXT_PUBLIC_STATIC_BUILD=1 next build",
     "start": "next start",

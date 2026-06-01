@@ -87,7 +87,7 @@ export default function Home() {
                   Domain lookup is disabled (no TLS socket from the browser).
                 </p>
                 <p className="mb-1">
-                  Paste the leaf certificate <em>and</em> its issuer (as a PEM
+                  Paste the leaf certificate <em>and</em>{' '}its issuer (as a PEM
                   chain) for full SCT signature verification — without the
                   issuer, the precert hash can&apos;t be reconstructed. The app
                   will try to fetch the issuer automatically from the cert&apos;s
