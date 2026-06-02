@@ -38,7 +38,7 @@ async function getKnownLogUrls(): Promise<Set<string>> {
  * Determine how to handle the response based on the endpoint path.
  *
  * - `checkpoint`   → RFC 9162 signed note (text/plain) → wrap in { text }
- * - `tile/…`       → Sunlight hash or data tile (binary) → encode as { bytes: base64 }
+ * - `tile/...`       → Sunlight hash or data tile (binary) → encode as { bytes: base64 }
  * - anything else  → RFC 6962 JSON
  */
 function endpointResponseType(path: string): 'text' | 'binary' | 'json' {

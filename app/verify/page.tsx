@@ -393,7 +393,7 @@ function VerifyInner() {
                   key={i}
                   className="text-xs font-mono bg-slate-800 border border-slate-700 rounded px-2.5 py-1 text-slate-300"
                 >
-                  {sct.log?.description ?? `Unknown (${toHex(sct.logId).slice(0, 12)}…)`}
+                  {sct.log?.description ?? `Unknown (${toHex(sct.logId)})`}
                 </span>
               ))}
             </div>
@@ -416,10 +416,10 @@ function VerifyInner() {
           <div className="bg-slate-900 border border-slate-700 rounded-xl p-8 flex items-center justify-center gap-3 text-slate-500">
             <span className="animate-spin text-xl">◌</span>
             <span className="text-sm font-mono">
-              {state.phase === 'fetching-cert' && 'Connecting to server…'}
-              {state.phase === 'parsing-cert' && 'Parsing X.509 certificate…'}
-              {state.phase === 'parsing-scts' && 'Parsing SCT list…'}
-              {state.phase === 'fetching-logs' && 'Fetching CT log directory…'}
+              {state.phase === 'fetching-cert' && 'Connecting to server...'}
+              {state.phase === 'parsing-cert' && 'Parsing X.509 certificate...'}
+              {state.phase === 'parsing-scts' && 'Parsing SCT list...'}
+              {state.phase === 'fetching-logs' && 'Fetching CT log directory...'}
             </span>
           </div>
         )}
@@ -464,7 +464,7 @@ export default function VerifyPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 font-mono">
-          Loading…
+          Loading...
         </div>
       }
     >

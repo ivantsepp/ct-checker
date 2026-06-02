@@ -8,11 +8,6 @@ interface Props {
   proof: InclusionProof
 }
 
-function shortHex(bytes: Uint8Array, n = 8): string {
-  const h = toHex(bytes)
-  return h.slice(0, n * 2) + '…'
-}
-
 export default function MerklePathViz({ proof }: Props) {
   const [open, setOpen] = useState(false)
 

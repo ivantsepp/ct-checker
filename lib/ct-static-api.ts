@@ -124,7 +124,7 @@ export function formatTileIndex(n: number): string {
 
 /**
  * Build the URL path for a hash tile.
- * level: Sunlight tile level (0 = leaves, 1 = 256-leaf subtree roots, …)
+ * level: Sunlight tile level (0 = leaves, 1 = 256-leaf subtree roots, ...)
  * n:     tile index
  * width: number of entries (< 256 for partial tiles)
  */

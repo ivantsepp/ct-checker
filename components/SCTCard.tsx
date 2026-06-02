@@ -125,7 +125,7 @@ export default function SCTCard({ result, index, total }: Props) {
           </div>
           <div>
             <span className="text-slate-500">Log ID (hex): </span>
-            <span className="text-slate-300 break-all">{sct.logIdHex.slice(0, 32)}…</span>
+            <span className="text-slate-300 break-all">{sct.logIdHex}</span>
           </div>
           <div>
             <span className="text-slate-500">Algorithm: </span>
@@ -161,7 +161,7 @@ export default function SCTCard({ result, index, total }: Props) {
           {sigStatus === 'fail' && (
             <p className="text-red-300">{result.signatureError ?? 'Signature verification failed'}</p>
           )}
-          {sigStatus === 'pending' && <p className="text-slate-500">Waiting…</p>}
+          {sigStatus === 'pending' && <p className="text-slate-500">Waiting...</p>}
         </VerificationStep>
 
         {/* Step 2: Inclusion proof */}
@@ -186,7 +186,7 @@ export default function SCTCard({ result, index, total }: Props) {
                 <div>
                   <span className="text-slate-500">Leaf hash:{'  '}</span>
                   <span className="text-slate-300 break-all">
-                    {toHex(result.inclusionProof.leafHash).slice(0, 32)}…
+                    {toHex(result.inclusionProof.leafHash)}
                   </span>
                 </div>
                 <div>
@@ -196,7 +196,7 @@ export default function SCTCard({ result, index, total }: Props) {
                       : 'STH root:       '}
                   </span>
                   <span className="text-slate-300 break-all">
-                    {toHex(result.inclusionProof.rootHash).slice(0, 32)}…
+                    {toHex(result.inclusionProof.rootHash)}
                   </span>
                 </div>
               </div>
@@ -204,7 +204,7 @@ export default function SCTCard({ result, index, total }: Props) {
             </>
           )}
           {proofStatus === 'pending' && !result.inclusionError && (
-            <p className="text-slate-500">Waiting…</p>
+            <p className="text-slate-500">Waiting...</p>
           )}
           {result.apiCalls && result.apiCalls.length > 0 && (
             <ApiCallLog calls={result.apiCalls} />

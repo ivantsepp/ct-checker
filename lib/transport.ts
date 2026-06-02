@@ -63,7 +63,7 @@ export interface ApiCall {
   endpoint: string
   /** Query params sent (RFC 6962 endpoints only). */
   params?: Record<string, string>
-  /** The URL actually fetched — proxied (`/api/ct-proxy?…`) or direct. */
+  /** The URL actually fetched — proxied (`/api/ct-proxy?...`) or direct. */
   url: string
   /** How the request left the browser. */
   via: 'proxy' | 'direct'
