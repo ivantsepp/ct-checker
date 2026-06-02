@@ -119,10 +119,12 @@ export default function Home() {
                 </div>
               ) : (
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1.5 font-medium">
+                  <label htmlFor="cert" className="block text-xs text-slate-400 mb-1.5 font-medium">
                     Certificate (PEM, PEM chain, or base64 DER)
                   </label>
                   <textarea
+                    id="cert"
+                    spellCheck={false}
                     value={cert}
                     onChange={(e) => setCert(e.target.value)}
                     placeholder={'-----BEGIN CERTIFICATE-----\nMIIE...  (leaf)\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nMIIF...  (issuer - needed for SCT precert verify)\n-----END CERTIFICATE-----'}
@@ -140,7 +142,7 @@ export default function Home() {
 
               <button
                 type="submit"
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors text-sm"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 px-4 rounded-lg transition-colors text-sm cursor-pointer"
               >
                 Verify →
               </button>

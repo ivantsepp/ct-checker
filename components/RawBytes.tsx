@@ -41,7 +41,7 @@ export default function RawBytes({ label, hex, className = '' }: Props) {
         <span className="text-slate-600">({byteCount} bytes)</span>
       </button>
       {open && (
-        <pre className="mt-2 p-3 bg-slate-900 border border-slate-700 rounded text-xs font-mono text-slate-300 overflow-x-auto leading-relaxed whitespace-pre">
+        <pre className="mt-2 p-3 bg-slate-900 border border-slate-700 rounded text-xs font-mono text-slate-300 overflow-x-auto leading-relaxed whitespace-pre [font-variant-ligatures:none]">
           {formatHex(hex)}
         </pre>
       )}
