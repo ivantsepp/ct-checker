@@ -1,7 +1,7 @@
 'use client'
 
 import type { SCTVerificationResult } from '@/types/ct'
-import { toHex } from '@/lib/sct-parser'
+import { toHex, fromBase64 } from '@/lib/sct-parser'
 import { logState } from '@/lib/log-list'
 import VerificationStep from './VerificationStep'
 import MerklePathViz from './MerklePathViz'
@@ -134,8 +134,31 @@ export default function SCTCard({ result, index, total }: Props) {
               {HASH_NAMES[sct.hashAlgorithm] ?? `hash(${sct.hashAlgorithm})`}
             </span>
           </div>
+          <div>
+            <span className="text-slate-500">Extensions: </span>
+            {sct.parsedExtensions.leafIndex !== undefined ? (
+              <span className="text-slate-300">
+                leaf_index ={' '}
+                <span className="text-sky-300">
+                  {sct.parsedExtensions.leafIndex.toLocaleString()}
+                </span>
+                {' '}
+                <span className="text-slate-500">
+                  (0x{sct.parsedExtensions.leafIndex.toString(16)}, uint40 BE — C2SP static-ct-api)
+                </span>
+              </span>
+            ) : sct.extensions.length > 0 ? (
+              <span className="text-slate-300 break-all">{toHex(sct.extensions)}</span>
+            ) : (
+              <span className="text-slate-500">none</span>
+            )}
+          </div>
+          <div>
+            <span className="text-slate-500">Signature (hex): </span>
+            <span className="text-slate-300 break-all">{toHex(sct.signature)}</span>
+          </div>
         </div>
-        <RawBytes label="Raw SCT bytes" hex={toHex(result.sct.signature)} className="mt-2" />
+        <RawBytes label="Signature (DER bytes)" hex={toHex(sct.signature)} className="mt-2" />
       </div>
 
       {/* Verification steps */}
@@ -153,9 +176,51 @@ export default function SCTCard({ result, index, total }: Props) {
                   <> Entry type: <span className="font-mono text-xs bg-slate-800 px-1 py-0.5 rounded">x509_entry</span> — signed over the full certificate DER.</>
                 )}
               </p>
+              {log && (
+                <div className="mt-1 font-mono text-xs">
+                  <span className="text-slate-500">Log public key (SPKI, hex): </span>
+                  <span className="text-slate-300 break-all">{toHex(fromBase64(log.key))}</span>
+                </div>
+              )}
               {result.signedBlobHex && (
                 <RawBytes label="Signed blob (what the log signed)" hex={result.signedBlobHex} />
               )}
+
+              {/* ECDSA verification, step by step */}
+              <div className="mt-2 p-3 bg-slate-900 border border-slate-700 rounded space-y-1.5 font-mono text-xs">
+                {result.digestHex && (
+                  <div>
+                    <span className="text-slate-500">
+                      ① SHA-256(signed blob){'  '}=
+                    </span>{' '}
+                    <span className="text-amber-300 break-all">{result.digestHex}</span>
+                  </div>
+                )}
+                {result.sigRHex && result.sigSHex && (
+                  <>
+                    <div>
+                      <span className="text-slate-500">② signature&nbsp;r{'           '}=</span>{' '}
+                      <span className="text-sky-300 break-all">{result.sigRHex}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">{'  '}signature&nbsp;s{'           '}=</span>{' '}
+                      <span className="text-sky-300 break-all">{result.sigSHex}</span>
+                    </div>
+                  </>
+                )}
+                <p className="text-slate-500 leading-relaxed pt-0.5">
+                  ③ ECDSA{result.curve ? ` (${result.curve})` : ''} checks that{' '}
+                  <span className="text-sky-400">(r, s)</span> is a valid signature over the{' '}
+                  <span className="text-amber-400">digest</span> under the log&apos;s public key.
+                  The signature can&apos;t be recomputed from the message (it embeds a secret
+                  random nonce), so verification confirms the relation rather than reproducing
+                  the bytes.
+                </p>
+              </div>
+
+              <p className="text-emerald-400 font-semibold mt-1">
+                ✓ Signature verified against log public key
+              </p>
             </>
           )}
           {sigStatus === 'fail' && (

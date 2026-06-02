@@ -246,6 +246,10 @@ function VerifyInner() {
             updateResult(i, {
               signatureValid: sigResult.valid,
               signedBlobHex: sigResult.signedBlobHex,
+              digestHex: sigResult.digestHex,
+              curve: sigResult.curve,
+              sigRHex: sigResult.sigRHex,
+              sigSHex: sigResult.sigSHex,
               signatureError: sigResult.error,
               entryType: sigResult.entryType,
             })

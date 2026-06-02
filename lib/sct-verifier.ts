@@ -29,7 +29,9 @@ function derECDSAToRaw(der: Uint8Array, coordLen: number): Uint8Array {
   return result
 }
 
-async function importLogKey(spkiB64: string): Promise<{ key: CryptoKey; coordLen: number }> {
+async function importLogKey(
+  spkiB64: string,
+): Promise<{ key: CryptoKey; coordLen: number; curve: string }> {
   const keyBytes = fromBase64(spkiB64)
   for (const [curve, coordLen] of [['P-256', 32], ['P-384', 48]] as const) {
     try {
@@ -40,7 +42,7 @@ async function importLogKey(spkiB64: string): Promise<{ key: CryptoKey; coordLen
         false,
         ['verify'],
       )
-      return { key, coordLen }
+      return { key, coordLen, curve }
     } catch {
       // try next curve
     }
@@ -83,7 +85,23 @@ export interface SCTSigVerifyResult {
   valid: boolean
   entryType: EntryType
   signedBlobHex: string
+  /** SHA-256 digest of the signed blob — the message the ECDSA signature authenticates. */
+  digestHex?: string
+  /** Named curve the log key uses (e.g. P-256). */
+  curve?: string
+  /** ECDSA signature `r` component (fixed-width, hex). */
+  sigRHex?: string
+  /** ECDSA signature `s` component (fixed-width, hex). */
+  sigSHex?: string
   error?: string
+}
+
+/** Split a raw r‖s ECDSA signature (2·coordLen bytes) into its two hex halves. */
+function splitRawSig(rawSig: Uint8Array, coordLen: number): { r: string; s: string } {
+  return {
+    r: toHex(rawSig.slice(0, coordLen)),
+    s: toHex(rawSig.slice(coordLen, coordLen * 2)),
+  }
 }
 
 export async function verifySCTSignature(
@@ -97,15 +115,33 @@ export async function verifySCTSignature(
 
   let cryptoKey: CryptoKey
   let coordLen: number
+  let curve: string
   try {
     const imported = await importLogKey(sct.log.key)
     cryptoKey = imported.key
     coordLen = imported.coordLen
+    curve = imported.curve
   } catch (e) {
     return { valid: false, entryType: 'unknown', signedBlobHex: '', error: String(e) }
   }
 
   const rawSig = derECDSAToRaw(sct.signature, coordLen)
+  const { r: sigRHex, s: sigSHex } = splitRawSig(rawSig, coordLen)
+
+  // Build the success result once the verifying blob is known: compute the
+  // SHA-256 digest the signature authenticates and expose the (r, s) pair.
+  async function success(entryType: EntryType, blob: Uint8Array): Promise<SCTSigVerifyResult> {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', blob.slice()))
+    return {
+      valid: true,
+      entryType,
+      signedBlobHex: toHex(blob),
+      digestHex: toHex(digest),
+      curve,
+      sigRHex,
+      sigSHex,
+    }
+  }
 
   // Try precert_entry first (most modern certs)
   if (issuerCertDER) {
@@ -119,7 +155,7 @@ export async function verifySCTSignature(
         blob.slice(),
       )
       if (valid) {
-        return { valid: true, entryType: 'precert_entry', signedBlobHex: toHex(blob) }
+        return await success('precert_entry', blob)
       }
     } catch (e) {
       // fall through to x509
@@ -135,7 +171,7 @@ export async function verifySCTSignature(
       rawSig.slice(),
       x509Blob.slice(),
     )
-    if (valid) return { valid: true, entryType: 'x509_entry', signedBlobHex: toHex(x509Blob) }
+    if (valid) return await success('x509_entry', x509Blob)
     // Neither precert_entry (if attempted) nor x509_entry matched.  The most
     // likely cause for a modern cert is a missing issuer — almost every leaf
     // cert today is logged as a precertificate, and rebuilding that requires

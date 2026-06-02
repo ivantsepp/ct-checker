@@ -67,6 +67,14 @@ export interface SCTVerificationResult {
   signatureValid: boolean | null
   signatureError?: string
   signedBlobHex?: string
+  /** SHA-256 digest of the signed blob — the message the ECDSA signature authenticates. */
+  digestHex?: string
+  /** Named curve of the log's key (e.g. P-256). */
+  curve?: string
+  /** ECDSA signature `r` component (hex). */
+  sigRHex?: string
+  /** ECDSA signature `s` component (hex). */
+  sigSHex?: string
   entryType?: 'x509_entry' | 'precert_entry' | 'unknown'
   inclusionProof: InclusionProof | null
   inclusionError?: string
