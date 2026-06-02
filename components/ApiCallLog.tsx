@@ -2,10 +2,40 @@
 
 import { useState } from 'react'
 import type { ApiCall } from '@/lib/transport'
+import { fromBase64, toHex } from '@/lib/sct-parser'
 import RawBytes from './RawBytes'
 
 interface Props {
   calls: ApiCall[]
+}
+
+/**
+ * RFC 6962 JSON responses encode binary fields as base64.  Pull out the ones
+ * worth seeing as hex (root hash, tree-head signature, and each audit-path
+ * sibling) so the user can compare them against the Merkle visualisation.
+ */
+function decodeBase64Fields(json: unknown): { label: string; hex: string }[] {
+  if (!json || typeof json !== 'object') return []
+  const obj = json as Record<string, unknown>
+  const out: { label: string; hex: string }[] = []
+
+  const tryDecode = (label: string, value: unknown) => {
+    if (typeof value !== 'string') return
+    try {
+      out.push({ label, hex: toHex(fromBase64(value)) })
+    } catch {
+      // not valid base64 — skip
+    }
+  }
+
+  for (const field of ['sha256_root_hash', 'tree_head_signature']) {
+    tryDecode(field, obj[field])
+  }
+  if (Array.isArray(obj.audit_path)) {
+    obj.audit_path.forEach((entry, i) => tryDecode(`audit_path[${i}]`, entry))
+  }
+
+  return out
 }
 
 /** Short, human-readable name for a CT log endpoint. */
@@ -20,6 +50,7 @@ function endpointLabel(endpoint: string): string {
 
 function ApiCallRow({ call }: { call: ApiCall }) {
   const [open, setOpen] = useState(false)
+  const decoded = call.json !== undefined ? decodeBase64Fields(call.json) : []
 
   return (
     <div className="border border-slate-700 rounded bg-slate-900/60">
@@ -69,6 +100,19 @@ function ApiCallRow({ call }: { call: ApiCall }) {
               <pre className="p-2 bg-slate-950 border border-slate-700 rounded text-slate-300 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
                 {JSON.stringify(call.json, null, 2)}
               </pre>
+            )}
+            {decoded.length > 0 && (
+              <div className="mt-1.5">
+                <p className="text-slate-500 mb-0.5">Decoded (base64 → hex)</p>
+                <div className="pl-2 border-l border-slate-700 space-y-0.5">
+                  {decoded.map((d) => (
+                    <div key={d.label} className="break-all">
+                      <span className="text-slate-500">{d.label}: </span>
+                      <span className="text-emerald-300/80">{d.hex}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
             {call.text !== undefined && (
               <pre className="p-2 bg-slate-950 border border-slate-700 rounded text-slate-300 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
