@@ -119,7 +119,7 @@ function PhaseIndicator({ phase, sctCount }: { phase: Phase; sctCount: number })
             <span className={done ? 'text-slate-400' : active ? 'text-slate-200' : 'text-slate-600'}>
               {step.label}
             </span>
-            {i < steps.length - 1 && <span className="text-slate-700 mx-1">→</span>}
+            {i < steps.length - 1 && <span className="text-slate-500 mx-1">→</span>}
           </div>
         )
       })}

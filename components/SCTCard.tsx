@@ -173,7 +173,8 @@ export default function SCTCard({ result, index, total }: Props) {
               <p className="flex flex-wrap items-center gap-x-1">
                 <span>
                   Leaf {result.inclusionProof.leafIndex.toLocaleString()} of{' '}
-                  {result.inclusionProof.treeSize.toLocaleString()} in the log&apos;s Merkle tree.
+                  {result.inclusionProof.treeSize.toLocaleString()}{' '}
+                  in the log&apos;s Merkle tree.
                 </span>
                 <ProtocolBadges
                   sthApiType={result.inclusionProof.sthApiType}
