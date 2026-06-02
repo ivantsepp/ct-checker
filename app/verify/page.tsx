@@ -11,7 +11,7 @@ import { verifySCTSignature } from '@/lib/sct-verifier'
 import { getSTH, getProofByHash } from '@/lib/ct-api'
 import { buildInclusionProof } from '@/lib/merkle'
 import { toHex } from '@/lib/sct-parser'
-import { IS_STATIC_BUILD, CORSError } from '@/lib/transport'
+import { IS_STATIC_BUILD, CORSError, type ApiCall } from '@/lib/transport'
 import SCTCard from '@/components/SCTCard'
 import ThemeToggle from '@/components/ThemeToggle'
 
@@ -258,8 +258,14 @@ function VerifyInner() {
             const logUrl = sct.log.url
             const entryType = sigResult.entryType
 
+            // Capture every CT-log HTTP call made for THIS SCT's proof so the
+            // card can show the raw requests/responses.  A per-SCT collector
+            // keeps calls correctly attributed across the parallel Promise.all.
+            const apiCalls: ApiCall[] = []
+            const record = (c: ApiCall) => apiCalls.push(c)
+
             try {
-              const sth = await getSTH(logUrl)
+              const sth = await getSTH(logUrl, record)
               if (cancelled) return
 
               const lHash = await (await import('@/lib/merkle')).computeLeafHash(
@@ -273,6 +279,7 @@ function VerifyInner() {
                 sth.treeSize,
                 sct.timestamp,
                 sct.parsedExtensions.leafIndex,
+                record,
               )
               if (cancelled) return
 
@@ -290,13 +297,14 @@ function VerifyInner() {
               )
               if (cancelled) return
 
-              updateResult(i, { inclusionProof: inclusion })
+              updateResult(i, { inclusionProof: inclusion, apiCalls })
             } catch (e) {
               if (!cancelled) {
                 if (e instanceof CORSError) {
                   setState((s) => ({ ...s, corsHit: true }))
                 }
-                updateResult(i, { inclusionError: String(e) })
+                // Attach whatever calls ran so failures are debuggable too.
+                updateResult(i, { inclusionError: String(e), apiCalls })
               }
             }
           }),

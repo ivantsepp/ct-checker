@@ -1,5 +1,5 @@
 import { fromBase64 } from './sct-parser'
-import { ctFetch } from './transport'
+import { ctFetch, type ApiRecorder } from './transport'
 import {
   getSTHFromCheckpoint,
   buildProofFromTiles,
@@ -22,8 +22,13 @@ export interface CTProofResponse {
   proofApiType: 'rfc6962' | 'tiles'
 }
 
-async function ctGet(logUrl: string, path: string, params?: Record<string, string>): Promise<unknown> {
-  const { json } = await ctFetch(logUrl, path, params)
+async function ctGet(
+  logUrl: string,
+  path: string,
+  params?: Record<string, string>,
+  recorder?: ApiRecorder,
+): Promise<unknown> {
+  const { json } = await ctFetch(logUrl, path, params, recorder)
   return json
 }
 
@@ -32,10 +37,10 @@ async function ctGet(logUrl: string, path: string, params?: Record<string, strin
  * Tries RFC 6962 `ct/v1/get-sth` first; if that fails (e.g. a Sunlight-only
  * log), falls back to parsing the RFC 9162 `/checkpoint` signed note.
  */
-export async function getSTH(logUrl: string): Promise<STH> {
+export async function getSTH(logUrl: string, recorder?: ApiRecorder): Promise<STH> {
   // ── RFC 6962 path ─────────────────────────────────────────────────────────
   try {
-    const data = (await ctGet(logUrl, 'ct/v1/get-sth')) as {
+    const data = (await ctGet(logUrl, 'ct/v1/get-sth', undefined, recorder)) as {
       tree_size: number
       timestamp: number
       sha256_root_hash: string
@@ -49,7 +54,7 @@ export async function getSTH(logUrl: string): Promise<STH> {
   } catch (rfc6962Err) {
     // ── Sunlight / RFC 9162 fallback ─────────────────────────────────────────
     try {
-      return await getSTHFromCheckpoint(logUrl)
+      return await getSTHFromCheckpoint(logUrl, recorder)
     } catch (sunlightErr) {
       throw new Error(
         `RFC 6962 get-sth failed (${rfc6962Err}); Sunlight checkpoint also failed (${sunlightErr})`,
@@ -80,6 +85,7 @@ export async function getProofByHash(
   treeSize: number,
   sctTimestamp?: bigint,
   knownLeafIndex?: number,
+  recorder?: ApiRecorder,
 ): Promise<CTProofResponse> {
   // ── RFC 6962 path ─────────────────────────────────────────────────────────
   try {
@@ -87,7 +93,7 @@ export async function getProofByHash(
     const data = (await ctGet(logUrl, 'ct/v1/get-proof-by-hash', {
       hash: hashB64,
       tree_size: String(treeSize),
-    })) as { leaf_index: number; audit_path: string[] }
+    }, recorder)) as { leaf_index: number; audit_path: string[] }
     return {
       leafIndex: data.leaf_index,
       auditPath: (data.audit_path ?? []).map(fromBase64),
@@ -101,7 +107,7 @@ export async function getProofByHash(
     //          fetch and use it directly — this skips ~log2(N/256) data-tile
     //          probes from the binary search.
     if (knownLeafIndex !== undefined) {
-      leafIndex = await verifyLeafAtIndex(logUrl, knownLeafIndex, leafHash, treeSize)
+      leafIndex = await verifyLeafAtIndex(logUrl, knownLeafIndex, leafHash, treeSize, recorder)
     }
 
     // Step 1b: fall back to timestamp-based binary search if the extension
@@ -113,11 +119,11 @@ export async function getProofByHash(
           'leaf_index extension or SCT timestamp was provided',
         )
       }
-      leafIndex = await findLeafIndex(logUrl, sctTimestamp, leafHash, treeSize)
+      leafIndex = await findLeafIndex(logUrl, sctTimestamp, leafHash, treeSize, recorder)
     }
 
     // Step 2: reconstruct the audit path from hash tiles.
-    const auditPath = await buildProofFromTiles(logUrl, leafIndex, treeSize)
+    const auditPath = await buildProofFromTiles(logUrl, leafIndex, treeSize, recorder)
     return { leafIndex, auditPath, proofApiType: 'tiles' }
   }
 }

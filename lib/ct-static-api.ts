@@ -20,7 +20,7 @@
 
 import type { STH } from './ct-api'
 import { concat, fromBase64 } from './sct-parser'
-import { ctFetch } from './transport'
+import { ctFetch, type ApiRecorder } from './transport'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -146,8 +146,8 @@ export function dataTilePath(n: number, width?: number): string {
 /**
  * Fetch the signed-note checkpoint for a Sunlight log.
  */
-export async function getCheckpoint(logUrl: string): Promise<Checkpoint> {
-  const { text } = await ctFetch(logUrl, 'checkpoint')
+export async function getCheckpoint(logUrl: string, recorder?: ApiRecorder): Promise<Checkpoint> {
+  const { text } = await ctFetch(logUrl, 'checkpoint', undefined, recorder)
   if (!text) throw new Error('No text in checkpoint response')
   return parseCheckpoint(text)
 }
@@ -155,16 +155,23 @@ export async function getCheckpoint(logUrl: string): Promise<Checkpoint> {
 /**
  * Fetch the STH-equivalent from a Sunlight checkpoint.
  */
-export async function getSTHFromCheckpoint(logUrl: string): Promise<STH & { apiType: 'sunlight' }> {
-  const cp = await getCheckpoint(logUrl)
+export async function getSTHFromCheckpoint(
+  logUrl: string,
+  recorder?: ApiRecorder,
+): Promise<STH & { apiType: 'sunlight' }> {
+  const cp = await getCheckpoint(logUrl, recorder)
   return checkpointToSTH(cp)
 }
 
 /**
  * Fetch raw bytes from a tile endpoint (hash or data tile).
  */
-export async function fetchTileBytes(logUrl: string, tilePath: string): Promise<Uint8Array> {
-  const { bytes } = await ctFetch(logUrl, tilePath)
+export async function fetchTileBytes(
+  logUrl: string,
+  tilePath: string,
+  recorder?: ApiRecorder,
+): Promise<Uint8Array> {
+  const { bytes } = await ctFetch(logUrl, tilePath, undefined, recorder)
   if (!bytes) throw new Error(`No bytes in tile response for ${tilePath}`)
   return bytes
 }
@@ -210,6 +217,7 @@ export async function getHashTile(
   tileIdx: number,
   treeSize: number,
   cache: TileCache = new Map(),
+  recorder?: ApiRecorder,
 ): Promise<Uint8Array[]> {
   const key = `${tileLevel}:${tileIdx}`
   if (cache.has(key)) return cache.get(key)!
@@ -225,11 +233,11 @@ export async function getHashTile(
   let bytes: Uint8Array
 
   try {
-    bytes = await fetchTileBytes(logUrl, path)
+    bytes = await fetchTileBytes(logUrl, path, recorder)
   } catch {
     // Some logs serve partial tiles at the full-tile URL too — try without the .p suffix
     if (isLastPartialTile) {
-      bytes = await fetchTileBytes(logUrl, hashTilePath(tileLevel, tileIdx))
+      bytes = await fetchTileBytes(logUrl, hashTilePath(tileLevel, tileIdx), recorder)
     } else {
       throw new Error(`Failed to fetch tile ${path}`)
     }
@@ -263,6 +271,7 @@ export async function getHashAtBinaryLevel(
   index: number,
   treeSize: number,
   cache: TileCache,
+  recorder?: ApiRecorder,
 ): Promise<Uint8Array> {
   const subtreeFull = Math.pow(2, binaryLevel)
   const subtreeStart = index * subtreeFull
@@ -272,7 +281,7 @@ export async function getHashAtBinaryLevel(
     )
   }
   const n = Math.min(subtreeFull, treeSize - subtreeStart)
-  return subtreeHash(logUrl, subtreeStart, n, treeSize, cache)
+  return subtreeHash(logUrl, subtreeStart, n, treeSize, cache, recorder)
 }
 
 /**
@@ -290,19 +299,20 @@ async function subtreeHash(
   n: number,
   treeSize: number,
   cache: TileCache,
+  recorder?: ApiRecorder,
 ): Promise<Uint8Array> {
   const isPow2 = n > 0 && (n & (n - 1)) === 0
   const isAligned = isPow2 && start % n === 0
   if (isAligned && start + n <= treeSize) {
     // Complete, aligned subtree → tile lookup.
-    return getCompleteSubtreeHash(logUrl, Math.log2(n), start / n, treeSize, cache)
+    return getCompleteSubtreeHash(logUrl, Math.log2(n), start / n, treeSize, cache, recorder)
   }
 
   // Partial → RFC 6962 split: k = largest power of 2 with k < n.
   let k = 1
   while (k * 2 < n) k *= 2
-  const left = await subtreeHash(logUrl, start, k, treeSize, cache)
-  const right = await subtreeHash(logUrl, start + k, n - k, treeSize, cache)
+  const left = await subtreeHash(logUrl, start, k, treeSize, cache, recorder)
+  const right = await subtreeHash(logUrl, start + k, n - k, treeSize, cache, recorder)
   return nodeHash(left, right)
 }
 
@@ -316,6 +326,7 @@ async function getCompleteSubtreeHash(
   index: number,
   treeSize: number,
   cache: TileCache,
+  recorder?: ApiRecorder,
 ): Promise<Uint8Array> {
   const tileLevel = Math.floor(binaryLevel / TILE_HEIGHT)
   const withinTile = binaryLevel % TILE_HEIGHT  // 0–7
@@ -324,7 +335,7 @@ async function getCompleteSubtreeHash(
     // Stored directly in a Sunlight tile.
     const tileIdx = Math.floor(index / TILE_WIDTH)
     const offset = index % TILE_WIDTH
-    const hashes = await getHashTile(logUrl, tileLevel, tileIdx, treeSize, cache)
+    const hashes = await getHashTile(logUrl, tileLevel, tileIdx, treeSize, cache, recorder)
     if (offset >= hashes.length) {
       throw new Error(
         `Complete subtree (binaryLevel=${binaryLevel}, index=${index}) missing ` +
@@ -343,7 +354,7 @@ async function getCompleteSubtreeHash(
     const lowerIdx = tileEntryStart + j
     const tileIdx = Math.floor(lowerIdx / TILE_WIDTH)
     const offset = lowerIdx % TILE_WIDTH
-    const hashes = await getHashTile(logUrl, tileLevel, tileIdx, treeSize, cache)
+    const hashes = await getHashTile(logUrl, tileLevel, tileIdx, treeSize, cache, recorder)
     if (offset >= hashes.length) {
       throw new Error(
         `Complete subtree at (binaryLevel=${binaryLevel}, index=${index}) needs ` +
@@ -483,6 +494,7 @@ async function fetchDataTile(
   logUrl: string,
   tileIdx: number,
   treeSize: number,
+  recorder?: ApiRecorder,
 ): Promise<DataTileEntry[]> {
   const remainder = treeSize % TILE_WIDTH
   const isLastPartial = remainder > 0 && tileIdx === Math.floor(treeSize / TILE_WIDTH)
@@ -490,13 +502,13 @@ async function fetchDataTile(
   let bytes: Uint8Array
   if (isLastPartial) {
     try {
-      bytes = await fetchTileBytes(logUrl, dataTilePath(tileIdx, remainder))
+      bytes = await fetchTileBytes(logUrl, dataTilePath(tileIdx, remainder), recorder)
     } catch {
       // Some logs omit the .p suffix for partial tiles
-      bytes = await fetchTileBytes(logUrl, dataTilePath(tileIdx))
+      bytes = await fetchTileBytes(logUrl, dataTilePath(tileIdx), recorder)
     }
   } else {
-    bytes = await fetchTileBytes(logUrl, dataTilePath(tileIdx))
+    bytes = await fetchTileBytes(logUrl, dataTilePath(tileIdx), recorder)
   }
 
   return parseDataTile(bytes)
@@ -517,11 +529,12 @@ export async function verifyLeafAtIndex(
   leafIdx: number,
   targetLeafHash: Uint8Array,
   treeSize: number,
+  recorder?: ApiRecorder,
 ): Promise<number | null> {
   if (leafIdx < 0 || leafIdx >= treeSize) return null
   const tileIdx = Math.floor(leafIdx / TILE_WIDTH)
   const offset = leafIdx % TILE_WIDTH
-  const entries = await fetchDataTile(logUrl, tileIdx, treeSize)
+  const entries = await fetchDataTile(logUrl, tileIdx, treeSize, recorder)
   if (offset >= entries.length) return null
   const hash = await dataEntryLeafHash(entries[offset].timestampedEntryBytes)
   const match = hash.length === targetLeafHash.length &&
@@ -546,13 +559,14 @@ export async function findLeafIndex(
   targetTimestamp: bigint,
   targetLeafHash: Uint8Array,
   treeSize: number,
+  recorder?: ApiRecorder,
 ): Promise<number> {
   const tileCache = new Map<number, DataTileEntry[]>()
   const totalTiles = Math.ceil(treeSize / TILE_WIDTH)
 
   async function getTile(idx: number): Promise<DataTileEntry[]> {
     if (tileCache.has(idx)) return tileCache.get(idx)!
-    const entries = await fetchDataTile(logUrl, idx, treeSize)
+    const entries = await fetchDataTile(logUrl, idx, treeSize, recorder)
     tileCache.set(idx, entries)
     return entries
   }
@@ -619,6 +633,7 @@ export async function buildProofFromTiles(
   logUrl: string,
   leafIdx: number,
   treeSize: number,
+  recorder?: ApiRecorder,
 ): Promise<Uint8Array[]> {
   const cache: TileCache = new Map()
   const auditPath: Uint8Array[] = []
@@ -629,7 +644,7 @@ export async function buildProofFromTiles(
   for (let binaryLevel = 0; size > 1; binaryLevel++) {
     const sibling = idx ^ 1
     if (sibling < size) {
-      const hash = await getHashAtBinaryLevel(logUrl, binaryLevel, sibling, treeSize, cache)
+      const hash = await getHashAtBinaryLevel(logUrl, binaryLevel, sibling, treeSize, cache, recorder)
       auditPath.push(hash)
     }
     idx = Math.floor(idx / 2)

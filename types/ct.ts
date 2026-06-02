@@ -28,6 +28,7 @@ export interface CTLog {
 }
 
 import type { SCTExtensionData } from '@/lib/sct-parser'
+import type { ApiCall } from '@/lib/transport'
 
 export interface ParsedSCT extends SCT {
   log: CTLog | null
@@ -69,6 +70,8 @@ export interface SCTVerificationResult {
   entryType?: 'x509_entry' | 'precert_entry' | 'unknown'
   inclusionProof: InclusionProof | null
   inclusionError?: string
+  /** CT-log HTTP calls made while building the inclusion proof. */
+  apiCalls?: ApiCall[]
 }
 
 export interface ParsedCert {

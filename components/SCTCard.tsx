@@ -6,6 +6,7 @@ import { logState } from '@/lib/log-list'
 import VerificationStep from './VerificationStep'
 import MerklePathViz from './MerklePathViz'
 import RawBytes from './RawBytes'
+import ApiCallLog from './ApiCallLog'
 
 const HASH_NAMES: Record<number, string> = { 4: 'SHA-256', 5: 'SHA-384', 6: 'SHA-512' }
 const SIG_NAMES: Record<number, string> = { 1: 'RSA', 3: 'ECDSA', 7: 'Ed25519' }
@@ -204,6 +205,9 @@ export default function SCTCard({ result, index, total }: Props) {
           )}
           {proofStatus === 'pending' && !result.inclusionError && (
             <p className="text-slate-500">Waiting…</p>
+          )}
+          {result.apiCalls && result.apiCalls.length > 0 && (
+            <ApiCallLog calls={result.apiCalls} />
           )}
         </VerificationStep>
       </div>
