@@ -26,6 +26,11 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      // The inline script below sets the `light` class on <html> before
+      // hydration, so the server-rendered class attribute intentionally
+      // differs from the client. Suppress the resulting hydration warning
+      // (applies only to this element's attributes, not its subtree).
+      suppressHydrationWarning
     >
       <head>
         {/* Apply the saved/system theme before paint to avoid a flash. */}
