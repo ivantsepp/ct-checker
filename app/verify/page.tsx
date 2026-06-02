@@ -8,7 +8,8 @@ import { fetchIssuerFromAIA } from '@/lib/aia-fetch'
 import { parseSCTList } from '@/lib/sct-parser'
 import { getLogList, enrichSCT } from '@/lib/log-list'
 import { verifySCTSignature } from '@/lib/sct-verifier'
-import { getSTH, getProofByHash } from '@/lib/ct-api'
+import { getSTH, getProofByHash, getProofFromTiles } from '@/lib/ct-api'
+import { getSTHFromCheckpoint } from '@/lib/ct-static-api'
 import { buildInclusionProof } from '@/lib/merkle'
 import { toHex } from '@/lib/sct-parser'
 import { IS_STATIC_BUILD, CORSError, type ApiCall } from '@/lib/transport'
@@ -264,8 +265,16 @@ function VerifyInner() {
             const apiCalls: ApiCall[] = []
             const record = (c: ApiCall) => apiCalls.push(c)
 
+            // The CT log list tells us which protocol this log speaks, so we
+            // go straight to the right endpoints — RFC 6962 ct/v1/* for
+            // standard logs, or the RFC 9162 checkpoint + tiles for Sunlight /
+            // tiled logs — instead of probing one and falling back.
+            const isTiled = sct.log.logType === 'tiled'
+
             try {
-              const sth = await getSTH(logUrl, record)
+              const sth = isTiled
+                ? await getSTHFromCheckpoint(logUrl, record)
+                : await getSTH(logUrl, record)
               if (cancelled) return
 
               const lHash = await (await import('@/lib/merkle')).computeLeafHash(
@@ -273,14 +282,16 @@ function VerifyInner() {
               )
               if (cancelled) return
 
-              const proof = await getProofByHash(
-                logUrl,
-                lHash,
-                sth.treeSize,
-                sct.timestamp,
-                sct.parsedExtensions.leafIndex,
-                record,
-              )
+              const proof = isTiled
+                ? await getProofFromTiles(
+                    logUrl,
+                    lHash,
+                    sth.treeSize,
+                    sct.timestamp,
+                    sct.parsedExtensions.leafIndex,
+                    record,
+                  )
+                : await getProofByHash(logUrl, lHash, sth.treeSize, record)
               if (cancelled) return
 
               const inclusion = await buildInclusionProof(
