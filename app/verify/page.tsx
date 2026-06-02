@@ -40,7 +40,7 @@ interface State {
 }
 
 function CertInfoCard({ cert }: { cert: ParsedCert }) {
-  const now = Date.now()
+  const [now] = useState(() => Date.now())
   const valid = now >= cert.notBefore.getTime() && now <= cert.notAfter.getTime()
   const expired = now > cert.notAfter.getTime()
 
