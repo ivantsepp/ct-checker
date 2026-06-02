@@ -15,8 +15,8 @@ A Next.js app that, given a domain, fetches its TLS certificate, parses the embe
   - `sct-parser.ts` — TLS-encoded SignedCertificateTimestampList + small bytes/base64 helpers re-exported widely.
   - `sct-verifier.ts` — verifies the SCT's ECDSA signature against the log's public key.
   - `log-list.ts` — wraps `/api/log-list` (cached Chrome v3 log_list.json).
-  - `ct-api.ts` — `getSTH` and `getProofByHash`. Tries **RFC 6962** (`ct/v1/get-sth`, `ct/v1/get-proof-by-hash`) first, falls back to **Sunlight / static-ct-api** (RFC 9162).
-  - `ct-static-api.ts` — Sunlight tile fetching, checkpoint parsing, `verifyLeafAtIndex` (1-fetch confirmation when the SCT carries the C2SP `leaf_index` extension), `findLeafIndex` (timestamp binary search — last-resort fallback), `buildProofFromTiles`.
+  - `ct-api.ts` — the **RFC 6962** path only: `getSTH` (`ct/v1/get-sth`) and `getProofByHash` (`ct/v1/get-proof-by-hash`). Each hits exactly one endpoint — no protocol fallback. `getProofFromTiles` here is the Sunlight proof entry point (delegates to `ct-static-api.ts`). The caller picks which to use.
+  - `ct-static-api.ts` — Sunlight / static-ct-api (RFC 9162): `getSTHFromCheckpoint` (`/checkpoint`), tile fetching, checkpoint parsing, `verifyLeafAtIndex` (1-fetch confirmation when the SCT carries the C2SP `leaf_index` extension), `findLeafIndex` (timestamp binary search — last-resort fallback), `buildProofFromTiles`.
   - `merkle.ts` — leaf-hash construction (x509 vs precert), `verifyInclusionProof` (RFC 6962 §2.1.1).
 - **`app/api/`** — server-side proxies; the browser can't reach CT logs directly.
   - `ct-proxy/` — forwards to a log URL. Validates the URL against the cached log list (open-redirect protection). Encodes responses as JSON, plain text (checkpoint), or `{ bytes: base64 }` (binary tiles) depending on the endpoint.
@@ -27,7 +27,7 @@ A Next.js app that, given a domain, fetches its TLS certificate, parses the embe
 
 ## Two CT log protocols, one frontend
 
-RFC 6962 logs serve JSON via `ct/v1/*`. Sunlight / static-ct-api logs serve a signed-note checkpoint at `/checkpoint` and binary hash/data tiles under `/tile/...`. `ct-api.ts` tries RFC 6962 first and falls back transparently — most Sunlight logs do NOT serve `ct/v1/get-sth`. Code that "fixes RFC 6962" must usually be reproduced for the tile path.
+RFC 6962 logs serve JSON via `ct/v1/*`. Sunlight / static-ct-api logs serve a signed-note checkpoint at `/checkpoint` and binary hash/data tiles under `/tile/...` (most Sunlight logs do NOT serve `ct/v1/*` at all). **The protocol is known up front** from the Chrome v3 log list: `log-list.ts` tags every log with `logType: 'rfc6962' | 'tiled'` (from the `log_list` vs `tiled_logs` arrays). The orchestrator in `app/verify/page.tsx` branches on `sct.log.logType` and calls the matching single-protocol functions — RFC 6962 (`getSTH` / `getProofByHash`) or Sunlight (`getSTHFromCheckpoint` / `getProofFromTiles`). There is **no** runtime "try one, fall back to the other" probing; the lib functions never cross protocols. Code that "fixes RFC 6962" must usually be reproduced for the tile path.
 
 ## Subtle invariants (don't break these)
 
