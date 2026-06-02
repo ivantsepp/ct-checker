@@ -38,13 +38,51 @@ function decodeBase64Fields(json: unknown): { label: string; hex: string }[] {
   return out
 }
 
+/** Hashes per Sunlight tile (tile height 8). Mirrors TILE_WIDTH in ct-static-api. */
+const TILE_WIDTH = 256
+
+/**
+ * Decode a Sunlight tile path into a readable label that includes the tile
+ * index (and the level, for hash tiles).  The index is the inverse of
+ * `formatTileIndex`: 3-digit groups, all but the last prefixed with `x`.
+ * A trailing `.p/<width>` marks a partial tile.
+ *
+ *   tile/data/x001/234      → "data tile #1,234"
+ *   tile/3/x001/234.p/100   → "hash tile L3 #1,234 (partial 100/256)"
+ */
+function describeTile(endpoint: string): string | null {
+  const partial = endpoint.match(/\.p\/(\d+)$/)
+  const width = partial ? Number(partial[1]) : undefined
+  const path = partial ? endpoint.slice(0, partial.index) : endpoint
+
+  let level: number | null = null
+  let rest: string
+  if (path.startsWith('tile/data/')) {
+    rest = path.slice('tile/data/'.length)
+  } else {
+    const m = path.match(/^tile\/(\d+)\/(.+)$/)
+    if (!m) return null
+    level = Number(m[1])
+    rest = m[2]
+  }
+
+  let n = 0
+  for (const seg of rest.split('/')) {
+    n = n * 1000 + Number(seg.replace(/^x/, ''))
+  }
+  if (Number.isNaN(n)) return null
+
+  const kind = level === null ? 'data tile' : `hash tile L${level}`
+  const suffix = width !== undefined ? ` (partial ${width}/${TILE_WIDTH})` : ''
+  return `${kind} #${n.toLocaleString()}${suffix}`
+}
+
 /** Short, human-readable name for a CT log endpoint. */
 function endpointLabel(endpoint: string): string {
   if (endpoint === 'checkpoint') return 'checkpoint'
   if (endpoint === 'ct/v1/get-sth') return 'get-sth'
   if (endpoint === 'ct/v1/get-proof-by-hash') return 'get-proof-by-hash'
-  if (endpoint.startsWith('tile/data/')) return 'data tile'
-  if (endpoint.startsWith('tile/')) return 'hash tile'
+  if (endpoint.startsWith('tile/')) return describeTile(endpoint) ?? endpoint
   return endpoint
 }
 
