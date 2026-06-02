@@ -167,7 +167,12 @@ export default function SCTCard({ result, index, total }: Props) {
         {/* Step 2: Inclusion proof */}
         <VerificationStep status={proofStatus} title="Merkle Inclusion Proof">
           {result.inclusionError && (
-            <p className="text-red-300">{result.inclusionError}</p>
+            <>
+              <p className="text-red-300">{result.inclusionError}</p>
+              {result.apiCalls && result.apiCalls.length > 0 && (
+                <ApiCallLog calls={result.apiCalls} />
+              )}
+            </>
           )}
           {result.inclusionProof && (
             <>
@@ -200,14 +205,14 @@ export default function SCTCard({ result, index, total }: Props) {
                   </span>
                 </div>
               </div>
+              {result.apiCalls && result.apiCalls.length > 0 && (
+                <ApiCallLog calls={result.apiCalls} />
+              )}
               <MerklePathViz proof={result.inclusionProof} />
             </>
           )}
           {proofStatus === 'pending' && !result.inclusionError && (
             <p className="text-slate-500">Waiting...</p>
-          )}
-          {result.apiCalls && result.apiCalls.length > 0 && (
-            <ApiCallLog calls={result.apiCalls} />
           )}
         </VerificationStep>
       </div>
