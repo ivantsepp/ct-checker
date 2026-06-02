@@ -127,7 +127,9 @@ export default function Home() {
                     onChange={(e) => setCert(e.target.value)}
                     placeholder={'-----BEGIN CERTIFICATE-----\nMIIE…  (leaf)\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nMIIF…  (issuer — needed for SCT precert verify)\n-----END CERTIFICATE-----'}
                     rows={9}
-                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 font-mono text-xs focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 transition-colors resize-none"
+                    // Geist Mono ligates runs of hyphens, mangling the "-----BEGIN/END"
+                    // PEM markers (and the pasted cert). Disable ligatures here.
+                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-500 font-mono text-xs [font-variant-ligatures:none] focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50 transition-colors resize-none"
                   />
                 </div>
               )}
