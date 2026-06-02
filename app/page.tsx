@@ -125,7 +125,7 @@ export default function Home() {
                   <textarea
                     value={cert}
                     onChange={(e) => setCert(e.target.value)}
-                    placeholder={'-----BEGIN CERTIFICATE-----\nMIIE…  (leaf)\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nMIIF…  (issuer — needed for SCT precert verify)\n-----END CERTIFICATE-----'}
+                    placeholder={'-----BEGIN CERTIFICATE-----\nMIIE...  (leaf)\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nMIIF...  (issuer - needed for SCT precert verify)\n-----END CERTIFICATE-----'}
                     rows={9}
                     // Geist Mono ligates runs of hyphens, mangling the "-----BEGIN/END"
                     // PEM markers (and the pasted cert). Disable ligatures here.
