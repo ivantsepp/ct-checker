@@ -309,6 +309,7 @@ function VerifyInner() {
                 sth.sha256RootHash,
                 sth.apiType,
                 proof.proofApiType,
+                proof.tileSources,
               )
               if (cancelled) return
 

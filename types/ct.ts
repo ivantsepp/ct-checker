@@ -39,12 +39,36 @@ export interface ParsedSCT extends SCT {
   parsedExtensions: SCTExtensionData
 }
 
+/** A single tile-entry read used to obtain a Merkle node hash. */
+export interface TileEntryRef {
+  kind: 'hash' | 'data'
+  /** Sunlight tile level (0 = leaves). Always 0 for data tiles. */
+  tileLevel: number
+  /** Tile index within the level. */
+  tileIdx: number
+  /** Entry offset within the tile (0–255). */
+  offset: number
+}
+
+/**
+ * Provenance of one audit-path sibling: the hash-tile entry (or entries, when
+ * the node is a computed subtree root) it was derived from.  Only populated for
+ * tiled (Sunlight / RFC 9162) proofs.
+ */
+export interface TileSource {
+  refs: TileEntryRef[]
+  /** True when the hash is a single complete-subtree hash stored directly in a tile. */
+  direct: boolean
+}
+
 export interface InclusionStep {
   level: number
   currentHash: Uint8Array
   sibling: Uint8Array
   siblingIsLeft: boolean
   parentHash: Uint8Array
+  /** Tiled logs only: which hash-tile entry(ies) produced this sibling. */
+  tileSource?: TileSource
 }
 
 export interface InclusionProof {

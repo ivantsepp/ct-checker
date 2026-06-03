@@ -19,8 +19,17 @@
  */
 
 import type { STH } from './ct-api'
+import type { TileEntryRef, TileSource } from '@/types/ct'
 import { concat, fromBase64 } from './sct-parser'
 import { ctFetch, type ApiRecorder } from './transport'
+
+/**
+ * Optional sink invoked for every hash-tile entry consumed while resolving a
+ * Merkle node, so callers can record which tile(s) each audit-path sibling
+ * came from.  Independent of the network `ApiRecorder` (cached reads still
+ * report their logical tile entry).
+ */
+type RefCollector = (ref: TileEntryRef) => void
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -272,6 +281,7 @@ export async function getHashAtBinaryLevel(
   treeSize: number,
   cache: TileCache,
   recorder?: ApiRecorder,
+  collect?: RefCollector,
 ): Promise<Uint8Array> {
   const subtreeFull = Math.pow(2, binaryLevel)
   const subtreeStart = index * subtreeFull
@@ -281,7 +291,7 @@ export async function getHashAtBinaryLevel(
     )
   }
   const n = Math.min(subtreeFull, treeSize - subtreeStart)
-  return subtreeHash(logUrl, subtreeStart, n, treeSize, cache, recorder)
+  return subtreeHash(logUrl, subtreeStart, n, treeSize, cache, recorder, collect)
 }
 
 /**
@@ -300,19 +310,20 @@ async function subtreeHash(
   treeSize: number,
   cache: TileCache,
   recorder?: ApiRecorder,
+  collect?: RefCollector,
 ): Promise<Uint8Array> {
   const isPow2 = n > 0 && (n & (n - 1)) === 0
   const isAligned = isPow2 && start % n === 0
   if (isAligned && start + n <= treeSize) {
     // Complete, aligned subtree → tile lookup.
-    return getCompleteSubtreeHash(logUrl, Math.log2(n), start / n, treeSize, cache, recorder)
+    return getCompleteSubtreeHash(logUrl, Math.log2(n), start / n, treeSize, cache, recorder, collect)
   }
 
   // Partial → RFC 6962 split: k = largest power of 2 with k < n.
   let k = 1
   while (k * 2 < n) k *= 2
-  const left = await subtreeHash(logUrl, start, k, treeSize, cache, recorder)
-  const right = await subtreeHash(logUrl, start + k, n - k, treeSize, cache, recorder)
+  const left = await subtreeHash(logUrl, start, k, treeSize, cache, recorder, collect)
+  const right = await subtreeHash(logUrl, start + k, n - k, treeSize, cache, recorder, collect)
   return nodeHash(left, right)
 }
 
@@ -327,6 +338,7 @@ async function getCompleteSubtreeHash(
   treeSize: number,
   cache: TileCache,
   recorder?: ApiRecorder,
+  collect?: RefCollector,
 ): Promise<Uint8Array> {
   const tileLevel = Math.floor(binaryLevel / TILE_HEIGHT)
   const withinTile = binaryLevel % TILE_HEIGHT  // 0–7
@@ -342,6 +354,7 @@ async function getCompleteSubtreeHash(
         `from tile ${tileLevel}/${tileIdx} (got ${hashes.length} entries)`,
       )
     }
+    collect?.({ kind: 'hash', tileLevel, tileIdx, offset })
     return hashes[offset]
   }
 
@@ -362,6 +375,7 @@ async function getCompleteSubtreeHash(
         `tile/${tileLevel}/${tileIdx} has only ${hashes.length}`,
       )
     }
+    collect?.({ kind: 'hash', tileLevel, tileIdx, offset })
     lowerHashes.push(hashes[offset])
   }
 
@@ -627,16 +641,19 @@ export async function findLeafIndex(
  * in a tree of `treeSize` leaves, using Sunlight hash tiles.
  *
  * Returns the same audit path format as `ct/v1/get-proof-by-hash`:
- * an ordered array of 32-byte sibling hashes (from leaf level to root).
+ * an ordered array of 32-byte sibling hashes (from leaf level to root), plus a
+ * parallel array of `TileSource`s describing which tile entry(ies) produced
+ * each sibling.
  */
 export async function buildProofFromTiles(
   logUrl: string,
   leafIdx: number,
   treeSize: number,
   recorder?: ApiRecorder,
-): Promise<Uint8Array[]> {
+): Promise<{ auditPath: Uint8Array[]; sources: TileSource[] }> {
   const cache: TileCache = new Map()
   const auditPath: Uint8Array[] = []
+  const sources: TileSource[] = []
 
   let idx = leafIdx
   let size = treeSize
@@ -644,12 +661,19 @@ export async function buildProofFromTiles(
   for (let binaryLevel = 0; size > 1; binaryLevel++) {
     const sibling = idx ^ 1
     if (sibling < size) {
-      const hash = await getHashAtBinaryLevel(logUrl, binaryLevel, sibling, treeSize, cache, recorder)
+      const refs: TileEntryRef[] = []
+      const hash = await getHashAtBinaryLevel(
+        logUrl, binaryLevel, sibling, treeSize, cache, recorder, (r) => refs.push(r),
+      )
       auditPath.push(hash)
+      // A single ref means the sibling is a complete subtree hash stored
+      // directly in one tile entry; multiple refs means it was recombined
+      // from lower-level entries (within-tile levels or a partial right edge).
+      sources.push({ refs, direct: refs.length === 1 })
     }
     idx = Math.floor(idx / 2)
     size = Math.ceil(size / 2)
   }
 
-  return auditPath
+  return { auditPath, sources }
 }

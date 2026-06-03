@@ -1,4 +1,4 @@
-import type { SCT, InclusionProof, InclusionStep } from '@/types/ct'
+import type { SCT, InclusionProof, InclusionStep, TileSource } from '@/types/ct'
 import { concat, writeUint16BE, writeUint24BE, writeUint64BE } from './sct-parser'
 import { buildPreCertSignedEntry } from './precert'
 import type { EntryType } from './sct-verifier'
@@ -114,6 +114,7 @@ export async function buildInclusionProof(
   rootHash: Uint8Array,
   sthApiType?: 'rfc6962' | 'sunlight',
   proofApiType?: 'rfc6962' | 'tiles',
+  tileSources?: TileSource[],
 ): Promise<InclusionProof> {
   const lHash = await computeLeafHash(sct, certDER, entryType, issuerCertDER)
   const { verified, computedRoot, steps } = await verifyInclusionProof(
@@ -123,6 +124,13 @@ export async function buildInclusionProof(
     auditPath,
     rootHash,
   )
+  // steps[i] is built in order from auditPath[i], so tileSources[i] (also
+  // parallel to auditPath) lines up one-to-one with each step.
+  if (tileSources) {
+    steps.forEach((step, i) => {
+      step.tileSource = tileSources[i]
+    })
+  }
   return {
     leafIndex,
     treeSize,

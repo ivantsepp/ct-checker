@@ -59,6 +59,16 @@ export default function SCTCard({ result, index, total }: Props) {
   const log = sct.log
   const state = log ? logState(log) : null
   const [showSigSteps, setShowSigSteps] = useState(false)
+  // Sticky selection linking inclusion-path nodes to the tile requests (in the
+  // API log) that produced them, keyed by tile identity (see tileKey). Clicking
+  // a node or a tile request selects its tiles; clicking the same selection
+  // again clears it.
+  const [selectedTiles, setSelectedTiles] = useState<Set<string> | null>(null)
+  const toggleTiles = (keys: Set<string>) => {
+    setSelectedTiles((prev) =>
+      prev && prev.size === keys.size && [...keys].every((k) => prev.has(k)) ? null : keys,
+    )
+  }
 
   const stateColour =
     state === 'usable' || state === 'qualified'
@@ -282,9 +292,17 @@ export default function SCTCard({ result, index, total }: Props) {
                 </div>
               </div>
               {result.apiCalls && result.apiCalls.length > 0 && (
-                <ApiCallLog calls={result.apiCalls} />
+                <ApiCallLog
+                  calls={result.apiCalls}
+                  selected={selectedTiles}
+                  onToggle={toggleTiles}
+                />
               )}
-              <MerklePathViz proof={result.inclusionProof} />
+              <MerklePathViz
+                proof={result.inclusionProof}
+                selected={selectedTiles}
+                onToggle={toggleTiles}
+              />
             </>
           )}
           {proofStatus === 'pending' && !result.inclusionError && (

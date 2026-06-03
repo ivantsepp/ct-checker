@@ -3,10 +3,15 @@
 import { useState } from 'react'
 import type { ApiCall } from '@/lib/transport'
 import { fromBase64, toHex } from '@/lib/sct-parser'
+import { parseTilePath, tileLabel, tileKey } from '@/lib/tile-label'
 import RawBytes from './RawBytes'
 
 interface Props {
   calls: ApiCall[]
+  /** Tile keys currently selected (shared with the inclusion-path viz). */
+  selected?: Set<string> | null
+  /** Toggle the selection for a set of tile keys (click to select / clear). */
+  onToggle?: (keys: Set<string>) => void
 }
 
 /**
@@ -38,76 +43,83 @@ function decodeBase64Fields(json: unknown): { label: string; hex: string }[] {
   return out
 }
 
-/** Hashes per Sunlight tile (tile height 8). Mirrors TILE_WIDTH in ct-static-api. */
-const TILE_WIDTH = 256
-
-/**
- * Decode a Sunlight tile path into a readable label that includes the tile
- * index (and the level, for hash tiles).  The index is the inverse of
- * `formatTileIndex`: 3-digit groups, all but the last prefixed with `x`.
- * A trailing `.p/<width>` marks a partial tile.
- *
- *   tile/data/x001/234      → "data tile #1,234"
- *   tile/3/x001/234.p/100   → "hash tile L3 #1,234 (partial 100/256)"
- */
-function describeTile(endpoint: string): string | null {
-  const partial = endpoint.match(/\.p\/(\d+)$/)
-  const width = partial ? Number(partial[1]) : undefined
-  const path = partial ? endpoint.slice(0, partial.index) : endpoint
-
-  let level: number | null = null
-  let rest: string
-  if (path.startsWith('tile/data/')) {
-    rest = path.slice('tile/data/'.length)
-  } else {
-    const m = path.match(/^tile\/(\d+)\/(.+)$/)
-    if (!m) return null
-    level = Number(m[1])
-    rest = m[2]
-  }
-
-  let n = 0
-  for (const seg of rest.split('/')) {
-    n = n * 1000 + Number(seg.replace(/^x/, ''))
-  }
-  if (Number.isNaN(n)) return null
-
-  const kind = level === null ? 'data tile' : `hash tile L${level}`
-  const suffix = width !== undefined ? ` (partial ${width}/${TILE_WIDTH})` : ''
-  return `${kind} #${n.toLocaleString()}${suffix}`
-}
-
 /** Short, human-readable name for a CT log endpoint. */
 function endpointLabel(endpoint: string): string {
   if (endpoint === 'checkpoint') return 'checkpoint'
   if (endpoint === 'ct/v1/get-sth') return 'get-sth'
   if (endpoint === 'ct/v1/get-proof-by-hash') return 'get-proof-by-hash'
-  if (endpoint.startsWith('tile/')) return describeTile(endpoint) ?? endpoint
+  if (endpoint.startsWith('tile/')) {
+    const p = parseTilePath(endpoint)
+    return p ? tileLabel(p) : endpoint
+  }
   return endpoint
 }
 
-function ApiCallRow({ call }: { call: ApiCall }) {
+function ApiCallRow({
+  call,
+  selected,
+  onToggle,
+}: {
+  call: ApiCall
+  selected?: Set<string> | null
+  onToggle?: (keys: Set<string>) => void
+}) {
   const [open, setOpen] = useState(false)
   const decoded = call.json !== undefined ? decodeBase64Fields(call.json) : []
 
+  // This row's tile identity, so it can be cross-linked with the inclusion-path
+  // sibling(s) it provided.
+  const parsed = call.endpoint.startsWith('tile/') ? parseTilePath(call.endpoint) : null
+  const key = parsed ? tileKey(parsed.kind, parsed.level, parsed.idx) : null
+  const active = key !== null && !!selected?.has(key)
+
+  // Clicking the row expands/collapses its details. The proof-path highlight is
+  // a separate, explicit control: the ⌖ "locate" button on tile rows toggles a
+  // sticky highlight of the path nodes this tile produced (and vice versa).
   return (
-    <div className="border border-slate-700 rounded bg-slate-900/60">
-      <button
+    <div
+      className={`border rounded transition-colors ${
+        active ? 'border-amber-500/70 bg-amber-500/10' : 'border-slate-700 bg-slate-900/60'
+      }`}
+    >
+      <div
         onClick={() => setOpen((o) => !o)}
+        title={open ? 'Hide details' : 'Show details'}
         className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs font-mono hover:bg-slate-800/60 transition-colors cursor-pointer"
       >
-        <span className={`transition-transform text-slate-500 ${open ? 'rotate-90' : ''}`}>▶</span>
+        <span className={`inline-block transition-transform text-slate-500 ${open ? 'rotate-90' : ''}`}>▶</span>
         <span className="text-slate-500">{call.method}</span>
         <span className="text-slate-200">{endpointLabel(call.endpoint)}</span>
+        {key && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggle?.(new Set([key]))
+            }}
+            title={
+              active
+                ? 'Clear highlight in the inclusion path'
+                : 'Highlight where this tile is used in the inclusion path'
+            }
+            aria-pressed={active}
+            className={`ml-auto px-1 leading-none rounded cursor-pointer transition-colors ${
+              active
+                ? 'text-amber-300 bg-amber-500/20'
+                : 'text-slate-500 hover:text-amber-300 hover:bg-slate-700/60'
+            }`}
+          >
+            ⌖
+          </button>
+        )}
         <span
-          className={`ml-auto px-1.5 py-0.5 rounded font-bold ${
+          className={`${key ? '' : 'ml-auto'} px-1.5 py-0.5 rounded font-bold ${
             call.ok ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
           }`}
         >
           {call.ok ? (call.status ?? 'OK') : (call.status ?? 'ERR')}
         </span>
         <span className="text-slate-600">{Math.round(call.durationMs)}ms</span>
-      </button>
+      </div>
 
       {open && (
         <div className="px-2.5 pb-2.5 pt-1 space-y-2 text-xs font-mono border-t border-slate-700/60">
@@ -171,7 +183,7 @@ function ApiCallRow({ call }: { call: ApiCall }) {
  * Collapsible list of the CT-log HTTP calls (get-sth, get-proof-by-hash,
  * checkpoint, tiles) that built this SCT's inclusion proof.
  */
-export default function ApiCallLog({ calls }: Props) {
+export default function ApiCallLog({ calls, selected, onToggle }: Props) {
   const [open, setOpen] = useState(false)
 
   return (
@@ -187,7 +199,7 @@ export default function ApiCallLog({ calls }: Props) {
       {open && (
         <div className="mt-2 space-y-1.5">
           {calls.map((call, i) => (
-            <ApiCallRow key={i} call={call} />
+            <ApiCallRow key={i} call={call} selected={selected} onToggle={onToggle} />
           ))}
         </div>
       )}

@@ -1,3 +1,4 @@
+import type { TileSource } from '@/types/ct'
 import { fromBase64 } from './sct-parser'
 import { ctFetch, type ApiRecorder } from './transport'
 import {
@@ -19,6 +20,8 @@ export interface CTProofResponse {
   auditPath: Uint8Array[]
   /** How the audit path was obtained. */
   proofApiType: 'rfc6962' | 'tiles'
+  /** Tiled logs only: provenance for each audit-path sibling (parallel to auditPath). */
+  tileSources?: TileSource[]
 }
 
 async function ctGet(
@@ -116,6 +119,6 @@ export async function getProofFromTiles(
   }
 
   // Step 2: reconstruct the audit path from hash tiles.
-  const auditPath = await buildProofFromTiles(logUrl, leafIndex, treeSize, recorder)
-  return { leafIndex, auditPath, proofApiType: 'tiles' }
+  const { auditPath, sources } = await buildProofFromTiles(logUrl, leafIndex, treeSize, recorder)
+  return { leafIndex, auditPath, proofApiType: 'tiles', tileSources: sources }
 }
