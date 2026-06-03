@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import type { SCTVerificationResult } from '@/types/ct'
 import { toHex, fromBase64 } from '@/lib/sct-parser'
 import { logState } from '@/lib/log-list'
@@ -57,6 +58,7 @@ export default function SCTCard({ result, index, total }: Props) {
   const { sct } = result
   const log = sct.log
   const state = log ? logState(log) : null
+  const [showSigSteps, setShowSigSteps] = useState(false)
 
   const stateColour =
     state === 'usable' || state === 'qualified'
@@ -186,41 +188,50 @@ export default function SCTCard({ result, index, total }: Props) {
                 <RawBytes label="Signed blob (what the log signed)" hex={result.signedBlobHex} />
               )}
 
-              {/* ECDSA verification, step by step */}
-              <div className="mt-2 p-3 bg-slate-900 border border-slate-700 rounded space-y-1.5 font-mono text-xs">
-                {result.digestHex && (
-                  <div>
-                    <span className="text-slate-500">
-                      ① SHA-256(signed blob){'  '}=
-                    </span>{' '}
-                    <span className="text-amber-300 break-all">{result.digestHex}</span>
-                  </div>
-                )}
-                {result.sigRHex && result.sigSHex && (
-                  <>
-                    <div>
-                      <span className="text-slate-500">② signature&nbsp;r{'           '}=</span>{' '}
-                      <span className="text-sky-300 break-all">{result.sigRHex}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">{'  '}signature&nbsp;s{'           '}=</span>{' '}
-                      <span className="text-sky-300 break-all">{result.sigSHex}</span>
-                    </div>
-                  </>
-                )}
-                <p className="text-slate-500 leading-relaxed pt-0.5">
-                  ③ ECDSA{result.curve ? ` (${result.curve})` : ''} checks that{' '}
-                  <span className="text-sky-400">(r, s)</span> is a valid signature over the{' '}
-                  <span className="text-amber-400">digest</span> under the log&apos;s public key.
-                  The signature can&apos;t be recomputed from the message (it embeds a secret
-                  random nonce), so verification confirms the relation rather than reproducing
-                  the bytes.
-                </p>
-              </div>
-
               <p className="text-emerald-400 font-semibold mt-1">
                 ✓ Signature verified against log public key
               </p>
+
+              {/* ECDSA verification, step by step — collapsible */}
+              <button
+                onClick={() => setShowSigSteps((o) => !o)}
+                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors font-mono mt-1"
+              >
+                <span className={`transition-transform ${showSigSteps ? 'rotate-90' : ''}`}>▶</span>
+                ECDSA verification, step by step
+              </button>
+              {showSigSteps && (
+                <div className="mt-1 p-3 bg-slate-900 border border-slate-700 rounded space-y-1.5 font-mono text-xs">
+                  {result.digestHex && (
+                    <div>
+                      <span className="text-slate-500">
+                        ① SHA-256(signed blob){'  '}=
+                      </span>{' '}
+                      <span className="text-amber-300 break-all">{result.digestHex}</span>
+                    </div>
+                  )}
+                  {result.sigRHex && result.sigSHex && (
+                    <>
+                      <div>
+                        <span className="text-slate-500">② signature&nbsp;r{'           '}=</span>{' '}
+                        <span className="text-sky-300 break-all">{result.sigRHex}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">{'  '}signature&nbsp;s{'           '}=</span>{' '}
+                        <span className="text-sky-300 break-all">{result.sigSHex}</span>
+                      </div>
+                    </>
+                  )}
+                  <p className="text-slate-500 leading-relaxed pt-0.5">
+                    ③ ECDSA{result.curve ? ` (${result.curve})` : ''} checks that{' '}
+                    <span className="text-sky-400">(r, s)</span> is a valid signature over the{' '}
+                    <span className="text-amber-400">digest</span>{' '}under the log&apos;s public key.
+                    The signature can&apos;t be recomputed from the message (it embeds a secret
+                    random nonce), so verification confirms the relation rather than reproducing
+                    the bytes.
+                  </p>
+                </div>
+              )}
             </>
           )}
           {sigStatus === 'fail' && (
