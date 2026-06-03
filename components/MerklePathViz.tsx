@@ -15,7 +15,7 @@ export default function MerklePathViz({ proof }: Props) {
     <div className="mt-3">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors font-mono"
+        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors font-mono cursor-pointer"
       >
         <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         Show inclusion path ({proof.auditPath.length} steps)

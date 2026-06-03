@@ -195,7 +195,7 @@ export default function SCTCard({ result, index, total }: Props) {
               {/* ECDSA verification, step by step — collapsible */}
               <button
                 onClick={() => setShowSigSteps((o) => !o)}
-                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors font-mono mt-1"
+                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors font-mono mt-1 cursor-pointer"
               >
                 <span className={`transition-transform ${showSigSteps ? 'rotate-90' : ''}`}>▶</span>
                 ECDSA verification, step by step

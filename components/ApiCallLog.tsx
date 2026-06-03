@@ -94,7 +94,7 @@ function ApiCallRow({ call }: { call: ApiCall }) {
     <div className="border border-slate-700 rounded bg-slate-900/60">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs font-mono hover:bg-slate-800/60 transition-colors"
+        className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left text-xs font-mono hover:bg-slate-800/60 transition-colors cursor-pointer"
       >
         <span className={`transition-transform text-slate-500 ${open ? 'rotate-90' : ''}`}>▶</span>
         <span className="text-slate-500">{call.method}</span>
@@ -178,7 +178,7 @@ export default function ApiCallLog({ calls }: Props) {
     <div className="mt-3">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors font-mono"
+        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors font-mono cursor-pointer"
       >
         <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         CT API requests
