@@ -12,7 +12,7 @@ import { getSTH, getProofByHash, getProofFromTiles } from '@/lib/ct-api'
 import { getSTHFromCheckpoint } from '@/lib/ct-static-api'
 import { buildInclusionProof } from '@/lib/merkle'
 import { toHex } from '@/lib/sct-parser'
-import { HAS_PROXY, CORSError, apiUrl, type ApiCall } from '@/lib/transport'
+import { HAS_PROXY, CORSError, ProxyError, proxyUnreachableError, apiUrl, type ApiCall } from '@/lib/transport'
 import SCTCard from '@/components/SCTCard'
 import ThemeToggle from '@/components/ThemeToggle'
 
@@ -38,6 +38,12 @@ interface State {
    * not a verification failure.
    */
   corsHit?: boolean
+  /**
+   * Set when a request to the server-side proxy failed (unreachable, or a
+   * platform-level error such as a paused / over-quota Vercel backend).
+   * Triggers an informational banner distinct from the CORS one.
+   */
+  proxyDown?: boolean
 }
 
 function CertInfoCard({ cert }: { cert: ParsedCert }) {
@@ -171,7 +177,13 @@ function VerifyInner() {
               'configured. Go back and paste the certificate instead.',
             )
           }
-          const res = await fetch(apiUrl(`/api/fetch-cert?domain=${encodeURIComponent(domainParam)}`))
+          let res: Response
+          try {
+            res = await fetch(apiUrl(`/api/fetch-cert?domain=${encodeURIComponent(domainParam)}`))
+          } catch (e) {
+            // Opaque cross-origin failure — proxy down or over its quota.
+            throw proxyUnreachableError(e)
+          }
           const data = await res.json()
           if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`)
           certDER = Uint8Array.from(atob(data.certDER), (c) => c.charCodeAt(0))
@@ -320,8 +332,11 @@ function VerifyInner() {
                 if (e instanceof CORSError) {
                   setState((s) => ({ ...s, corsHit: true }))
                 }
+                if (e instanceof ProxyError) {
+                  setState((s) => ({ ...s, proxyDown: true }))
+                }
                 // Attach whatever calls ran so failures are debuggable too.
-                updateResult(i, { inclusionError: String(e), apiCalls })
+                updateResult(i, { inclusionError: e instanceof Error ? e.message : String(e), apiCalls })
               }
             }
           }),
@@ -333,8 +348,9 @@ function VerifyInner() {
           setState((s) => ({
             ...s,
             phase: 'error',
-            error: String(e),
+            error: e instanceof Error ? e.message : String(e),
             corsHit: s.corsHit || e instanceof CORSError,
+            proxyDown: s.proxyDown || e instanceof ProxyError,
           }))
         }
       }
@@ -389,6 +405,24 @@ function VerifyInner() {
               the inclusion proof can&apos;t be reconstructed without server help.
               SCT signatures still verify locally. To verify inclusion against
               these logs, run <span className="font-mono text-amber-200">npm run dev</span> locally.
+            </p>
+          </div>
+        )}
+
+        {/* Proxy backend unreachable / over-quota banner */}
+        {state.proxyDown && (
+          <div className="bg-amber-900/20 border border-amber-700/50 rounded-xl p-5">
+            <p className="text-amber-200 font-semibold mb-1">
+              Proxy backend didn&apos;t respond
+            </p>
+            <p className="text-amber-300/90 text-sm leading-relaxed">
+              A request to the server-side proxy failed. It may be offline or over
+              its free-tier usage limit — when a hosted backend hits its quota it&apos;s
+              paused, and the browser sees an opaque network error without the exact
+              status. Certificate parsing and SCT signature verification run locally
+              and are unaffected; inclusion-proof reconstruction needs the proxy.
+              Try again later, or run{' '}
+              <span className="font-mono text-amber-200">npm run dev</span> locally.
             </p>
           </div>
         )}

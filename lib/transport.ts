@@ -73,6 +73,61 @@ export class CORSError extends Error {
   }
 }
 
+/**
+ * Thrown when the server-side proxy itself can't be reached or returns a
+ * platform-level failure.
+ *
+ * In a static deployment the proxy is a separate origin (e.g. a Vercel Hobby
+ * project).  When that project is paused / over its free-tier limit, throttled,
+ * or otherwise down, the platform short-circuits the request BEFORE our handler
+ * runs — so the response carries no CORS headers, the browser blocks it, and a
+ * cross-origin `fetch()` rejects with an opaque `TypeError`.  In that (common)
+ * case we cannot read the HTTP status at all and only know the proxy is
+ * unreachable.  When a status IS readable, `status` is populated.
+ */
+export class ProxyError extends Error {
+  constructor(message: string, public readonly status?: number, cause?: unknown) {
+    super(message)
+    this.name = 'ProxyError'
+    if (cause) (this as Error & { cause?: unknown }).cause = cause
+  }
+}
+
+/** Build the generic "proxy unreachable" error (opaque cross-origin failure). */
+export function proxyUnreachableError(cause?: unknown): ProxyError {
+  const where = PROXY_BASE || 'the proxy backend'
+  return new ProxyError(
+    `Couldn't reach the proxy backend (${where}). It may be offline or over its ` +
+      `free-tier usage limit. Certificate parsing and SCT signature checks run in ` +
+      `your browser and are unaffected — try again later, or run the app locally ` +
+      `with \`npm run dev\`.`,
+    undefined,
+    cause,
+  )
+}
+
+/**
+ * Map a readable proxy HTTP status to a friendly message, for the cases where a
+ * platform error DOES reach us (e.g. a function timeout/crash that still passes
+ * through CORS).  Only statuses our own handler never returns are mapped, so we
+ * don't mislabel a legit app error (e.g. our 403 "Unknown CT log URL").
+ */
+function proxyStatusMessage(status: number): string | null {
+  if (status === 402) {
+    return 'The proxy backend appears paused — it has likely hit its free-tier ' +
+      'usage limit. Try again after the limit resets, or run the app locally.'
+  }
+  if (status === 429) {
+    return 'The proxy backend is rate-limited (too many requests or over quota). ' +
+      'Please wait a moment and retry.'
+  }
+  if (status === 503 || status === 504) {
+    return 'The proxy backend is temporarily unavailable (timeout or paused). ' +
+      'Try again shortly.'
+  }
+  return null
+}
+
 export interface CTResponse {
   json?: unknown
   text?: string
@@ -221,12 +276,33 @@ export async function ctFetch(
     const qs = params ? '&' + new URLSearchParams(params).toString() : ''
     const url = apiUrl(`/api/ct-proxy?logUrl=${encodeURIComponent(logUrl)}&endpoint=${encodeURIComponent(endpoint)}${qs}`)
 
-    const res = await fetch(url)
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      record({ ok: false, status: res.status, error: body.slice(0, 200) }, url, 'proxy')
-      throw new Error(`CT proxy ${res.status}: ${body.slice(0, 200)}`)
+    let res: Response
+    try {
+      res = await fetch(url)
+    } catch (e) {
+      // Opaque cross-origin failure: the proxy is down, or a platform error
+      // page (e.g. Vercel paused / over-quota) came back without CORS headers
+      // so the browser blocked it. The HTTP status is unreadable here.
+      record({ ok: false, error: String(e) }, url, 'proxy')
+      throw proxyUnreachableError(e)
     }
+
+    if (!res.ok) {
+      // A JSON body means our handler ran and returned a structured error.
+      // Otherwise it's a platform error page (paused / throttled / timed out).
+      const isJson = (res.headers.get('content-type') ?? '').includes('application/json')
+      if (isJson) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null
+        const msg = data?.error ?? `HTTP ${res.status}`
+        record({ ok: false, status: res.status, error: msg.slice(0, 200) }, url, 'proxy')
+        throw new ProxyError(`CT proxy ${res.status}: ${msg.slice(0, 200)}`, res.status)
+      }
+      await res.text().catch(() => '')
+      const friendly = proxyStatusMessage(res.status) ?? `Proxy backend error (HTTP ${res.status}).`
+      record({ ok: false, status: res.status, error: friendly.slice(0, 200) }, url, 'proxy')
+      throw new ProxyError(friendly, res.status)
+    }
+
     const data = (await res.json()) as { text?: string; bytes?: string; error?: string }
     if (data && typeof data === 'object' && 'error' in data && data.error) {
       record({ ok: false, error: String(data.error) }, url, 'proxy')
