@@ -16,7 +16,7 @@ The app splits into two free-tier deployments from one repo:
 | Build | `NEXT_PUBLIC_PROXY_BASE` | Behavior |
 |-------|--------------------------|----------|
 | dynamic (`dev`/`build`) | unset | same-origin `/api/*` (unchanged) |
-| static + remote proxy | set to Vercel URL | `/api/*` calls prefixed with it |
+| static + remote proxy | set to Vercel URL | direct browser fetch first; fall back to the remote `/api/*` only when the log is CORS-blocked (`fetch-cert` always uses the proxy — the browser can't open a TLS socket) |
 | static, no proxy | unset | direct browser → CT log (CORS-limited; domain lookup disabled) |
 
 ## 1. Backend on Vercel

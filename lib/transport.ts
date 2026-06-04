@@ -46,6 +46,14 @@ export function apiUrl(path: string): string {
 }
 
 /**
+ * CT log origins (static build only) that failed a direct browser fetch with a
+ * CORS/network error.  Once an origin is recorded here we skip the direct
+ * attempt and go straight to the proxy, so the failed request isn't repeated on
+ * every subsequent tile/endpoint fetch for that log.
+ */
+const corsBlockedOrigins = new Set<string>()
+
+/**
  * Thrown when a direct cross-origin fetch fails with a `TypeError` —
  * the browser's signal for either a CORS rejection or an outright
  * network failure (they're indistinguishable from JS, by design).
@@ -120,11 +128,16 @@ function toHexLocal(bytes: Uint8Array): string {
 }
 
 /**
- * Fetch a CT-log endpoint.  In proxy mode, hops through `/api/ct-proxy`;
- * in static mode, fetches the log URL directly and converts network
- * failures into `CORSError`.
+ * Fetch a CT-log endpoint.  Transport depends on the build:
  *
- * The return shape mirrors what the server proxy used to send back:
+ *   - No proxy (static, unconfigured): fetch the log directly from the browser.
+ *   - Dynamic build: hop through the same-origin `/api/ct-proxy`.
+ *   - Static build with a remote proxy: try a direct browser fetch first (many
+ *     logs serve CORS, so this avoids a cross-origin round trip to the proxy),
+ *     and fall back to the proxy only when the log is CORS-blocked.  Blocked
+ *     origins are remembered so the failed-direct attempt happens at most once.
+ *
+ * The return shape mirrors what the server proxy sends back:
  *   - `json`   for RFC 6962 `ct/v1/*`
  *   - `text`   for the RFC 9162 `checkpoint` signed note
  *   - `bytes`  for Sunlight binary tiles
@@ -158,7 +171,8 @@ export async function ctFetch(
     })
   }
 
-  if (!HAS_PROXY) {
+  // Direct browser → CT log fetch.  Throws CORSError on network/CORS failure.
+  const fetchDirect = async (): Promise<CTResponse> => {
     const base = logUrl.replace(/\/$/, '')
     const path = endpoint.replace(/^\//, '')
     const qs = params ? '?' + new URLSearchParams(params).toString() : ''
@@ -202,32 +216,55 @@ export async function ctFetch(
     return { bytes }
   }
 
-  // ── Proxy mode ──────────────────────────────────────────────────────────
-  const qs = params ? '&' + new URLSearchParams(params).toString() : ''
-  const url = apiUrl(`/api/ct-proxy?logUrl=${encodeURIComponent(logUrl)}&endpoint=${encodeURIComponent(endpoint)}${qs}`)
+  // Hop through the server-side proxy (`/api/ct-proxy`).
+  const fetchViaProxy = async (): Promise<CTResponse> => {
+    const qs = params ? '&' + new URLSearchParams(params).toString() : ''
+    const url = apiUrl(`/api/ct-proxy?logUrl=${encodeURIComponent(logUrl)}&endpoint=${encodeURIComponent(endpoint)}${qs}`)
 
-  const res = await fetch(url)
-  if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    record({ ok: false, status: res.status, error: body.slice(0, 200) }, url, 'proxy')
-    throw new Error(`CT proxy ${res.status}: ${body.slice(0, 200)}`)
+    const res = await fetch(url)
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      record({ ok: false, status: res.status, error: body.slice(0, 200) }, url, 'proxy')
+      throw new Error(`CT proxy ${res.status}: ${body.slice(0, 200)}`)
+    }
+    const data = (await res.json()) as { text?: string; bytes?: string; error?: string }
+    if (data && typeof data === 'object' && 'error' in data && data.error) {
+      record({ ok: false, error: String(data.error) }, url, 'proxy')
+      throw new Error(String(data.error))
+    }
+    if (shape === 'json') {
+      record({ ok: true, json: data }, url, 'proxy')
+      return { json: data }
+    }
+    if (shape === 'text') {
+      if (typeof data.text !== 'string') throw new Error('Proxy returned no text')
+      record({ ok: true, text: data.text }, url, 'proxy')
+      return { text: data.text }
+    }
+    if (typeof data.bytes !== 'string') throw new Error('Proxy returned no bytes')
+    const bytes = fromBase64(data.bytes)
+    record({ ok: true, bytesHex: toHexLocal(bytes), byteLength: bytes.length }, url, 'proxy')
+    return { bytes }
   }
-  const data = (await res.json()) as { text?: string; bytes?: string; error?: string }
-  if (data && typeof data === 'object' && 'error' in data && data.error) {
-    record({ ok: false, error: String(data.error) }, url, 'proxy')
-    throw new Error(String(data.error))
+
+  // ── Pick a transport ──────────────────────────────────────────────────────
+  // Static build, no proxy configured: direct is the only option.
+  if (!HAS_PROXY) return fetchDirect()
+  // Dynamic build: proxy is same-origin and free; a direct cross-origin fetch
+  // would just CORS-fail, so go straight to the proxy.
+  if (!IS_STATIC_BUILD) return fetchViaProxy()
+
+  // Static build with a remote proxy: try direct first, fall back to the proxy
+  // only on a CORS/network error — and remember the blocked origin so we don't
+  // retry direct on every subsequent fetch for the same log.
+  const key = logUrl.replace(/\/$/, '')
+  if (!corsBlockedOrigins.has(key)) {
+    try {
+      return await fetchDirect()
+    } catch (e) {
+      if (!(e instanceof CORSError)) throw e // a real log error — don't mask it
+      corsBlockedOrigins.add(key)
+    }
   }
-  if (shape === 'json') {
-    record({ ok: true, json: data }, url, 'proxy')
-    return { json: data }
-  }
-  if (shape === 'text') {
-    if (typeof data.text !== 'string') throw new Error('Proxy returned no text')
-    record({ ok: true, text: data.text }, url, 'proxy')
-    return { text: data.text }
-  }
-  if (typeof data.bytes !== 'string') throw new Error('Proxy returned no bytes')
-  const bytes = fromBase64(data.bytes)
-  record({ ok: true, bytesHex: toHexLocal(bytes), byteLength: bytes.length }, url, 'proxy')
-  return { bytes }
+  return fetchViaProxy()
 }

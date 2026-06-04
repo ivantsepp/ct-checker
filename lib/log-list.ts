@@ -1,6 +1,6 @@
 import type { CTLog, ParsedSCT, SCT } from '@/types/ct'
 import { toHex, toBase64, fromBase64, parseSCTExtensions } from './sct-parser'
-import { HAS_PROXY, CORSError, apiUrl } from './transport'
+import { HAS_PROXY, IS_STATIC_BUILD, CORSError, apiUrl } from './transport'
 
 let cachedLogs: CTLog[] | null = null
 let cacheTime = 0
@@ -89,9 +89,9 @@ export async function getLogList(): Promise<CTLog[]> {
 
   let logs: CTLog[]
 
-  if (!HAS_PROXY) {
-    // No server proxy — fetch directly from gstatic. gstatic serves CORS
-    // headers, so this works from any origin.
+  // gstatic serves CORS headers, so in the browser we fetch the log list
+  // directly from it; only fall back to the proxy if that's somehow blocked.
+  const fetchDirect = async (): Promise<CTLog[]> => {
     let res: Response
     try {
       res = await fetch(LOG_LIST_URL)
@@ -100,13 +100,28 @@ export async function getLogList(): Promise<CTLog[]> {
       throw e
     }
     if (!res.ok) throw new Error(`Log list fetch failed: ${res.status}`)
-    const raw = (await res.json()) as RawLogListV3
-    logs = normalizeLogList(raw)
-  } else {
+    return normalizeLogList((await res.json()) as RawLogListV3)
+  }
+  const fetchViaProxy = async (): Promise<CTLog[]> => {
     const res = await fetch(apiUrl('/api/log-list'))
     if (!res.ok) throw new Error('Failed to fetch log list')
-    const data = (await res.json()) as { logs: CTLog[] }
-    logs = data.logs
+    return ((await res.json()) as { logs: CTLog[] }).logs
+  }
+
+  if (!IS_STATIC_BUILD) {
+    // Dynamic build: proxy is same-origin and free.
+    logs = await fetchViaProxy()
+  } else if (!HAS_PROXY) {
+    // Static build, no proxy: direct is the only option.
+    logs = await fetchDirect()
+  } else {
+    // Static build with a remote proxy: prefer direct, fall back on CORS.
+    try {
+      logs = await fetchDirect()
+    } catch (e) {
+      if (!(e instanceof CORSError)) throw e
+      logs = await fetchViaProxy()
+    }
   }
 
   cachedLogs = logs
