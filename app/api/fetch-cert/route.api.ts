@@ -92,6 +92,9 @@ export async function GET(request: NextRequest) {
       issuerDER: result.issuerDER ? result.issuerDER.toString('base64') : null,
     })
   } catch (e) {
-    return json({ error: String(e) }, { status: 502 })
+    // Generic message on purpose: distinct errors (refused vs timeout vs TLS
+    // failure) would turn this into a :443 port-scan oracle for public hosts.
+    console.error('fetch-cert: connection failed for', domain, e)
+    return json({ error: 'Could not retrieve certificate' }, { status: 502 })
   }
 }

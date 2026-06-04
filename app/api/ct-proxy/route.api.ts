@@ -48,6 +48,44 @@ function endpointResponseType(path: string): 'text' | 'binary' | 'json' {
   return 'json'
 }
 
+// CT responses are small (STHs, proofs, ≤256-entry tiles); cap the body we'll
+// buffer so a hostile or misbehaving upstream can't OOM the function or
+// amplify egress (base64 inflates by ~33%).
+const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
+
+/**
+ * Read a response body into memory, aborting if it exceeds `max` bytes.
+ * Streams and counts rather than trusting Content-Length (which a hostile
+ * server can omit or lie about), but also rejects early when the declared
+ * length is already over the limit.
+ */
+async function readBodyCapped(res: Response, max: number): Promise<Uint8Array> {
+  const declared = Number(res.headers.get('content-length') ?? '')
+  if (Number.isFinite(declared) && declared > max) {
+    throw new Error('upstream response too large')
+  }
+  const reader = res.body?.getReader()
+  if (!reader) return new Uint8Array(0)
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (value) {
+      total += value.length
+      if (total > max) {
+        await reader.cancel()
+        throw new Error('upstream response too large')
+      }
+      chunks.push(value)
+    }
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) { out.set(c, offset); offset += c.length }
+  return out
+}
+
 export function OPTIONS(request: NextRequest) {
   return preflight(request)
 }
@@ -97,41 +135,55 @@ export async function GET(request: NextRequest) {
         // For JSON endpoints request JSON explicitly; for others accept anything
         Accept: responseType === 'json' ? 'application/json' : '*/*',
       },
+      // Don't follow redirects: a compromised/misbehaving (but allowlisted) log
+      // could 302 us to an internal address (e.g. cloud metadata) → SSRF. CT
+      // logs don't legitimately redirect these endpoints, so treat 3xx as error.
+      redirect: 'manual',
       signal: AbortSignal.timeout(15_000),
     })
 
     if (!res.ok) {
-      const body = await res.text().catch(() => '')
+      // Cap the error body too — a hostile upstream could stuff megabytes into
+      // a 4xx/5xx response. 64 KiB is plenty for a diagnostic snippet.
+      const body = await readBodyCapped(res, 64 * 1024)
+        .then((b) => new TextDecoder().decode(b))
+        .catch(() => '')
       return json(
-        { error: `Log returned ${res.status}: ${body}` },
+        { error: `Log returned ${res.status}: ${body.slice(0, 200)}` },
         { status: res.status },
       )
     }
 
+    let raw: Uint8Array
+    try {
+      raw = await readBodyCapped(res, MAX_RESPONSE_BYTES)
+    } catch {
+      return json({ error: 'Upstream response too large' }, { status: 502 })
+    }
+
     // ── RFC 9162 checkpoint (plain-text signed note) ───────────────────────
     if (responseType === 'text') {
-      const text = await res.text()
-      return json({ text })
+      return json({ text: new TextDecoder().decode(raw) })
     }
 
     // ── Sunlight hash/data tile (binary octet-stream) ─────────────────────
     if (responseType === 'binary') {
-      const buffer = await res.arrayBuffer()
-      const bytes = Buffer.from(buffer).toString('base64')
-      return json({ bytes })
+      return json({ bytes: Buffer.from(raw).toString('base64') })
     }
 
     // ── RFC 6962 JSON endpoint ─────────────────────────────────────────────
+    const text = new TextDecoder().decode(raw)
     try {
-      return json(await res.json())
+      return json(JSON.parse(text))
     } catch {
-      const text = await res.text().catch(() => '(unreadable)')
       return json(
         { error: `Non-JSON response from log: ${text.slice(0, 200)}` },
         { status: 502 },
       )
     }
   } catch (e) {
-    return json({ error: String(e) }, { status: 502 })
+    // Don't leak internal error detail (resolved IPs, hostnames) to callers.
+    console.error('ct-proxy: upstream fetch failed:', e)
+    return json({ error: 'Upstream fetch failed' }, { status: 502 })
   }
 }
