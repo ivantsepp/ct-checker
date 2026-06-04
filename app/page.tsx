@@ -61,7 +61,7 @@ export default function Home() {
             {HAS_PROXY && (
               <div className="flex gap-1 p-1 bg-slate-800 rounded-lg mb-5">
                 <button
-                  className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer ${
                     mode === 'domain'
                       ? 'bg-slate-600 text-slate-100 shadow-sm'
                       : 'text-slate-400 hover:text-slate-200'
@@ -71,7 +71,7 @@ export default function Home() {
                   Domain
                 </button>
                 <button
-                  className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer ${
                     mode === 'cert'
                       ? 'bg-slate-600 text-slate-100 shadow-sm'
                       : 'text-slate-400 hover:text-slate-200'

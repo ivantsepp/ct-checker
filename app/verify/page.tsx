@@ -383,7 +383,7 @@ function VerifyInner() {
         <div className="max-w-4xl mx-auto flex items-center gap-3">
           <button
             onClick={() => router.push('/')}
-            className="text-slate-400 hover:text-slate-200 transition-colors text-sm font-mono"
+            className="text-slate-400 hover:text-slate-200 transition-colors text-sm font-mono cursor-pointer"
           >
             ← back
           </button>
