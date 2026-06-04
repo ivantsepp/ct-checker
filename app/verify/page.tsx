@@ -6,13 +6,13 @@ import type { ParsedCert, ParsedSCT, SCTVerificationResult } from '@/types/ct'
 import { normalizeCertChainInput, parseCert } from '@/lib/cert-parser'
 import { fetchIssuerFromAIA } from '@/lib/aia-fetch'
 import { parseSCTList } from '@/lib/sct-parser'
-import { getLogList, enrichSCT } from '@/lib/log-list'
+import { getLogList, enrichSCT, logState } from '@/lib/log-list'
 import { verifySCTSignature } from '@/lib/sct-verifier'
 import { getSTH, getProofByHash, getProofFromTiles } from '@/lib/ct-api'
 import { getSTHFromCheckpoint } from '@/lib/ct-static-api'
 import { buildInclusionProof } from '@/lib/merkle'
 import { toHex } from '@/lib/sct-parser'
-import { HAS_PROXY, CORSError, ProxyError, proxyUnreachableError, apiUrl, type ApiCall } from '@/lib/transport'
+import { HAS_PROXY, CORSError, ProxyError, LogUnavailableError, proxyUnreachableError, apiUrl, type ApiCall } from '@/lib/transport'
 import SCTCard from '@/components/SCTCard'
 import ThemeToggle from '@/components/ThemeToggle'
 
@@ -273,7 +273,8 @@ function VerifyInner() {
               return
             }
 
-            const logUrl = sct.log.url
+            const log = sct.log
+            const logUrl = log.url
             const entryType = sigResult.entryType
 
             // Capture every CT-log HTTP call made for THIS SCT's proof so the
@@ -335,8 +336,20 @@ function VerifyInner() {
                 if (e instanceof ProxyError) {
                   setState((s) => ({ ...s, proxyDown: true }))
                 }
+
+                let msg = e instanceof Error ? e.message : String(e)
+                // A dead/retired log is a per-log condition, not a verification
+                // failure — explain it and note that the signature still holds.
+                if (e instanceof LogUnavailableError) {
+                  const state = logState(log)
+                  const retiredish = state === 'retired' || state === 'read-only' || state === 'rejected'
+                  msg =
+                    `This CT log (${log.description}) is unreachable` +
+                    (retiredish ? ` — it has been ${state} and its server appears to be offline` : '') +
+                    `, so the inclusion proof can't be fetched. The SCT signature still verifies independently.`
+                }
                 // Attach whatever calls ran so failures are debuggable too.
-                updateResult(i, { inclusionError: e instanceof Error ? e.message : String(e), apiCalls })
+                updateResult(i, { inclusionError: msg, apiCalls })
               }
             }
           }),

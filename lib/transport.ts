@@ -93,6 +93,20 @@ export class ProxyError extends Error {
   }
 }
 
+/**
+ * Thrown when the CT *log* endpoint is unreachable — DNS failure, refused/timed
+ * out connection, etc.  Common for retired logs whose servers have been shut
+ * down (e.g. older logs referenced by long-lived certs).  Distinct from
+ * `ProxyError`: the proxy is healthy and responded; it's the upstream log
+ * that's gone, so it shouldn't trigger the "proxy down" UI.
+ */
+export class LogUnavailableError extends Error {
+  constructor(public readonly logUrl: string, detail?: string) {
+    super(detail ?? `CT log ${logUrl} is unreachable`)
+    this.name = 'LogUnavailableError'
+  }
+}
+
 /** Build the generic "proxy unreachable" error (opaque cross-origin failure). */
 export function proxyUnreachableError(cause?: unknown): ProxyError {
   const where = PROXY_BASE || 'the proxy backend'
@@ -292,10 +306,15 @@ export async function ctFetch(
       // Otherwise it's a platform error page (paused / throttled / timed out).
       const isJson = (res.headers.get('content-type') ?? '').includes('application/json')
       if (isJson) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null
+        // A JSON error means our handler ran and responded — the proxy is
+        // healthy, so this is NOT a proxy outage. It's an upstream/log error.
+        const data = (await res.json().catch(() => null)) as { error?: string; code?: string } | null
         const msg = data?.error ?? `HTTP ${res.status}`
         record({ ok: false, status: res.status, error: msg.slice(0, 200) }, url, 'proxy')
-        throw new ProxyError(`CT proxy ${res.status}: ${msg.slice(0, 200)}`, res.status)
+        if (data?.code === 'UPSTREAM_UNREACHABLE') {
+          throw new LogUnavailableError(logUrl, msg)
+        }
+        throw new Error(`CT proxy ${res.status}: ${msg.slice(0, 200)}`)
       }
       await res.text().catch(() => '')
       const friendly = proxyStatusMessage(res.status) ?? `Proxy backend error (HTTP ${res.status}).`

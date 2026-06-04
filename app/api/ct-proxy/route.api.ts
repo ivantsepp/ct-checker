@@ -183,7 +183,9 @@ export async function GET(request: NextRequest) {
     }
   } catch (e) {
     // Don't leak internal error detail (resolved IPs, hostnames) to callers.
+    // `code` lets the client tell "the log is unreachable" (e.g. a retired log
+    // whose server is gone) apart from a proxy outage — the proxy is fine here.
     console.error('ct-proxy: upstream fetch failed:', e)
-    return json({ error: 'Upstream fetch failed' }, { status: 502 })
+    return json({ error: 'Upstream fetch failed', code: 'UPSTREAM_UNREACHABLE' }, { status: 502 })
   }
 }
