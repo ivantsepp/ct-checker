@@ -24,7 +24,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '23' # Turbopack/eslint need Node 23 in this project
           cache: 'npm'
 
       - name: Install dependencies
@@ -36,6 +36,10 @@ jobs:
           # https://<user>.github.io/<repo>/. Override via env if you deploy
           # to a custom domain at the root.
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          # Remote proxy backend (this app deployed in dynamic mode on Vercel).
+          # Set repo variable PROXY_BASE = https://<your-app>.vercel.app
+          # (Settings → Secrets and variables → Actions → Variables).
+          NEXT_PUBLIC_PROXY_BASE: ${{ vars.PROXY_BASE }}
         run: npm run build:static
 
       # Disable Jekyll so files prefixed with `_` (Next's _next assets) get served.

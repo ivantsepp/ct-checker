@@ -32,7 +32,7 @@ The app splits into two free-tier deployments from one repo:
 1. Repo **Settings → Pages** → Source = **GitHub Actions**.
 2. Repo **Settings → Secrets and variables → Actions → Variables** → add
    **`PROXY_BASE`** = the Vercel URL from step 1.
-3. Push to `main` (or run the workflow manually). `.github/workflows/deploy-pages.yml`
+3. Push to `main` (or run the workflow manually). `.github/workflows/deploy.yml`
    builds with `NEXT_PUBLIC_BASE_PATH=/<repo>` + `NEXT_PUBLIC_PROXY_BASE` and publishes `out/`.
 
 ## Order & gotchas
