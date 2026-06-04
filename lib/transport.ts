@@ -9,15 +9,41 @@
  *     No CORS issues; the proxy can talk to logs that lack CORS headers.
  *
  *   - Static mode (`npm run build:static` → GitHub Pages):
- *     No server-side proxy exists.  Requests go directly from the browser to
- *     each CT log.  Many logs do not serve `Access-Control-Allow-Origin: *`,
- *     so the browser will block these as CORS errors.  We surface those to
- *     the UI as `CORSError`.
+ *     No server-side proxy is co-located.  Two sub-cases:
+ *       • A remote proxy is configured (`NEXT_PUBLIC_PROXY_BASE`, e.g. this
+ *         same app deployed in dynamic mode on Vercel): requests are prefixed
+ *         with that base and hop through the remote `/api/*` routes.  This is
+ *         the recommended GitHub Pages setup — full access, no CORS issues.
+ *       • No proxy configured: requests go directly from the browser to each
+ *         CT log.  Many logs do not serve `Access-Control-Allow-Origin: *`,
+ *         so the browser blocks these as CORS errors (surfaced as `CORSError`).
  */
 
 import { fromBase64 } from './sct-parser'
 
 export const IS_STATIC_BUILD = process.env.NEXT_PUBLIC_STATIC_BUILD === '1'
+
+/**
+ * Base URL of the server-side proxy.  Empty in the dynamic build (the `/api/*`
+ * routes are co-located, so same-origin relative URLs work).  In a static
+ * build, point `NEXT_PUBLIC_PROXY_BASE` at a separately-deployed backend
+ * (e.g. this same app running in dynamic mode on Vercel) and all `/api/*`
+ * calls are prefixed with it.
+ */
+export const PROXY_BASE = (process.env.NEXT_PUBLIC_PROXY_BASE ?? '').replace(/\/+$/, '')
+
+/**
+ * Whether a server-side proxy is reachable.  True in the dynamic build, or in
+ * a static build pointed at a remote proxy via `PROXY_BASE`.  When false
+ * (static build, no proxy), log fetches go direct from the browser and domain
+ * lookup is unavailable.
+ */
+export const HAS_PROXY = !IS_STATIC_BUILD || PROXY_BASE !== ''
+
+/** Prefix an `/api/...` path with the proxy base (no-op when same-origin). */
+export function apiUrl(path: string): string {
+  return PROXY_BASE + path
+}
 
 /**
  * Thrown when a direct cross-origin fetch fails with a `TypeError` —
@@ -132,7 +158,7 @@ export async function ctFetch(
     })
   }
 
-  if (IS_STATIC_BUILD) {
+  if (!HAS_PROXY) {
     const base = logUrl.replace(/\/$/, '')
     const path = endpoint.replace(/^\//, '')
     const qs = params ? '?' + new URLSearchParams(params).toString() : ''
@@ -178,7 +204,7 @@ export async function ctFetch(
 
   // ── Proxy mode ──────────────────────────────────────────────────────────
   const qs = params ? '&' + new URLSearchParams(params).toString() : ''
-  const url = `/api/ct-proxy?logUrl=${encodeURIComponent(logUrl)}&endpoint=${encodeURIComponent(endpoint)}${qs}`
+  const url = apiUrl(`/api/ct-proxy?logUrl=${encodeURIComponent(logUrl)}&endpoint=${encodeURIComponent(endpoint)}${qs}`)
 
   const res = await fetch(url)
   if (!res.ok) {

@@ -12,7 +12,7 @@ import { getSTH, getProofByHash, getProofFromTiles } from '@/lib/ct-api'
 import { getSTHFromCheckpoint } from '@/lib/ct-static-api'
 import { buildInclusionProof } from '@/lib/merkle'
 import { toHex } from '@/lib/sct-parser'
-import { IS_STATIC_BUILD, CORSError, type ApiCall } from '@/lib/transport'
+import { HAS_PROXY, CORSError, apiUrl, type ApiCall } from '@/lib/transport'
 import SCTCard from '@/components/SCTCard'
 import ThemeToggle from '@/components/ThemeToggle'
 
@@ -164,13 +164,14 @@ function VerifyInner() {
         let issuerCertDER: Uint8Array | null = null
 
         if (domainParam) {
-          if (IS_STATIC_BUILD) {
+          if (!HAS_PROXY) {
             throw new Error(
-              'Domain lookup is not available in the static (GitHub Pages) build — ' +
-              'the browser cannot open a TLS socket. Go back and paste the certificate instead.',
+              'Domain lookup is not available in this frontend-only build — ' +
+              'the browser cannot open a TLS socket, and no proxy backend is ' +
+              'configured. Go back and paste the certificate instead.',
             )
           }
-          const res = await fetch(`/api/fetch-cert?domain=${encodeURIComponent(domainParam)}`)
+          const res = await fetch(apiUrl(`/api/fetch-cert?domain=${encodeURIComponent(domainParam)}`))
           const data = await res.json()
           if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`)
           certDER = Uint8Array.from(atob(data.certDER), (c) => c.charCodeAt(0))

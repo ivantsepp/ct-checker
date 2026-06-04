@@ -1,6 +1,6 @@
 import type { CTLog, ParsedSCT, SCT } from '@/types/ct'
 import { toHex, toBase64, fromBase64, parseSCTExtensions } from './sct-parser'
-import { IS_STATIC_BUILD, CORSError } from './transport'
+import { HAS_PROXY, CORSError, apiUrl } from './transport'
 
 let cachedLogs: CTLog[] | null = null
 let cacheTime = 0
@@ -89,7 +89,7 @@ export async function getLogList(): Promise<CTLog[]> {
 
   let logs: CTLog[]
 
-  if (IS_STATIC_BUILD) {
+  if (!HAS_PROXY) {
     // No server proxy — fetch directly from gstatic. gstatic serves CORS
     // headers, so this works from any origin.
     let res: Response
@@ -103,7 +103,7 @@ export async function getLogList(): Promise<CTLog[]> {
     const raw = (await res.json()) as RawLogListV3
     logs = normalizeLogList(raw)
   } else {
-    const res = await fetch('/api/log-list')
+    const res = await fetch(apiUrl('/api/log-list'))
     if (!res.ok) throw new Error('Failed to fetch log list')
     const data = (await res.json()) as { logs: CTLog[] }
     logs = data.logs

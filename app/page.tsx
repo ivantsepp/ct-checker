@@ -2,14 +2,14 @@
 
 import { useState, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { IS_STATIC_BUILD } from '@/lib/transport'
+import { HAS_PROXY } from '@/lib/transport'
 import ThemeToggle from '@/components/ThemeToggle'
 
 export default function Home() {
   const router = useRouter()
-  // Static builds can't open a TLS socket from the browser, so the domain
+  // Without a proxy backend the browser can't open a TLS socket, so the domain
   // input is hidden — paste-cert is the only way in.
-  const [mode, setMode] = useState<'domain' | 'cert'>(IS_STATIC_BUILD ? 'cert' : 'domain')
+  const [mode, setMode] = useState<'domain' | 'cert'>(HAS_PROXY ? 'domain' : 'cert')
   const [domain, setDomain] = useState('')
   const [cert, setCert] = useState('')
   const [error, setError] = useState('')
@@ -57,8 +57,8 @@ export default function Home() {
 
           {/* Input card */}
           <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 shadow-xl">
-            {/* Mode toggle — domain mode hidden in static builds (no TLS socket) */}
-            {!IS_STATIC_BUILD && (
+            {/* Mode toggle — domain mode hidden without a proxy (no TLS socket) */}
+            {HAS_PROXY && (
               <div className="flex gap-1 p-1 bg-slate-800 rounded-lg mb-5">
                 <button
                   className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
@@ -82,7 +82,7 @@ export default function Home() {
                 </button>
               </div>
             )}
-            {IS_STATIC_BUILD && (
+            {!HAS_PROXY && (
               <div className="mb-5 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-3 py-2 leading-relaxed">
                 <p className="mb-1">
                   This is the frontend-only build hosted on GitHub Pages.

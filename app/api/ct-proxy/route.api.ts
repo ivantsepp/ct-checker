@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { withCors, preflight } from '@/lib/cors'
 
 const LOG_LIST_URL = 'https://www.gstatic.com/ct/log_list/v3/log_list.json'
 let knownLogUrls: Set<string> | null = null
@@ -47,13 +48,22 @@ function endpointResponseType(path: string): 'text' | 'binary' | 'json' {
   return 'json'
 }
 
+export function OPTIONS(request: NextRequest) {
+  return preflight(request)
+}
+
 export async function GET(request: NextRequest) {
+  const origin = request.headers.get('origin')
+  // CORS-wrapped JSON response shorthand.
+  const json = (body: unknown, init?: ResponseInit) =>
+    withCors(NextResponse.json(body, init), origin)
+
   const params = request.nextUrl.searchParams
   const logUrl = params.get('logUrl')
   const endpoint = params.get('endpoint')
 
   if (!logUrl || !endpoint) {
-    return NextResponse.json({ error: 'logUrl and endpoint required' }, { status: 400 })
+    return json({ error: 'logUrl and endpoint required' }, { status: 400 })
   }
 
   // Validate the log URL is a known CT log (prevents open redirect)
@@ -61,10 +71,10 @@ export async function GET(request: NextRequest) {
     const known = await getKnownLogUrls()
     const norm = logUrl.replace(/\/$/, '')
     if (!known.has(norm)) {
-      return NextResponse.json({ error: 'Unknown CT log URL' }, { status: 403 })
+      return json({ error: 'Unknown CT log URL' }, { status: 403 })
     }
   } catch {
-    return NextResponse.json({ error: 'Could not validate log URL' }, { status: 500 })
+    return json({ error: 'Could not validate log URL' }, { status: 500 })
   }
 
   // Build the target URL, forwarding only non-routing query params
@@ -92,7 +102,7 @@ export async function GET(request: NextRequest) {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      return NextResponse.json(
+      return json(
         { error: `Log returned ${res.status}: ${body}` },
         { status: res.status },
       )
@@ -101,27 +111,27 @@ export async function GET(request: NextRequest) {
     // ── RFC 9162 checkpoint (plain-text signed note) ───────────────────────
     if (responseType === 'text') {
       const text = await res.text()
-      return NextResponse.json({ text })
+      return json({ text })
     }
 
     // ── Sunlight hash/data tile (binary octet-stream) ─────────────────────
     if (responseType === 'binary') {
       const buffer = await res.arrayBuffer()
       const bytes = Buffer.from(buffer).toString('base64')
-      return NextResponse.json({ bytes })
+      return json({ bytes })
     }
 
     // ── RFC 6962 JSON endpoint ─────────────────────────────────────────────
     try {
-      return NextResponse.json(await res.json())
+      return json(await res.json())
     } catch {
       const text = await res.text().catch(() => '(unreadable)')
-      return NextResponse.json(
+      return json(
         { error: `Non-JSON response from log: ${text.slice(0, 200)}` },
         { status: 502 },
       )
     }
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 502 })
+    return json({ error: String(e) }, { status: 502 })
   }
 }
