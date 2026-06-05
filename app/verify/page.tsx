@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import type { ParsedCert, ParsedSCT, SCTVerificationResult } from '@/types/ct'
 import { normalizeCertChainInput, parseCert } from '@/lib/cert-parser'
 import { fetchIssuerFromAIA } from '@/lib/aia-fetch'
@@ -390,6 +391,12 @@ function VerifyInner() {
           <span className="text-slate-600">|</span>
           <span className="text-emerald-400 font-mono text-lg font-bold">CT</span>
           <span className="text-slate-400 font-mono text-sm truncate max-w-sm">{title}</span>
+          <Link
+            href="/feed"
+            className="ml-auto text-sm font-medium text-slate-400 hover:text-emerald-400 transition-colors"
+          >
+            Live Feed
+          </Link>
           <ThemeToggle />
         </div>
       </header>

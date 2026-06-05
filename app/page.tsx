@@ -3,7 +3,8 @@
 import { useState, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { HAS_PROXY } from '@/lib/transport'
-import ThemeToggle from '@/components/ThemeToggle'
+import NavBar from '@/components/NavBar'
+import LiveTicker from '@/components/LiveTicker'
 
 export default function Home() {
   const router = useRouter()
@@ -31,14 +32,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {/* Nav */}
-      <header className="border-b border-slate-800 px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center gap-3">
-          <span className="text-emerald-400 font-mono text-lg font-bold">CT</span>
-          <span className="text-slate-200 font-semibold">Certificate Transparency Verifier</span>
-          <ThemeToggle />
-        </div>
-      </header>
+      <NavBar />
 
       <div className="flex-1 flex flex-col items-center justify-center px-4 py-16">
         <div className="w-full max-w-2xl space-y-8">
@@ -148,6 +142,9 @@ export default function Home() {
               </button>
             </form>
           </div>
+
+          {/* Live feed preview */}
+          <LiveTicker />
 
           {/* What this checks */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
