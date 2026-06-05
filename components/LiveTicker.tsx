@@ -20,13 +20,22 @@ function fmtTime(ts: number): string {
 export default function LiveTicker() {
   const [rows, setRows] = useState<FeedCert[]>([])
   const [live, setLive] = useState(false)
+  const [paused, setPaused] = useState(false)
   const rateRef = useRef(0)
   const [rate, setRate] = useState(0)
   const [logCount, setLogCount] = useState(0)
 
+  // Read inside the long-lived poll loops (avoids stale closures).
+  const pausedRef = useRef(false)
+  const cursorsRef = useRef<Map<string, number | null>>(new Map())
+
+  useEffect(() => {
+    pausedRef.current = paused
+  }, [paused])
+
   useEffect(() => {
     let cancelled = false
-    const cursors = new Map<string, number | null>()
+    const cursors = cursorsRef.current
     const seen = new Set<string>()
 
     const rateId = setInterval(() => {
@@ -37,6 +46,10 @@ export default function LiveTicker() {
     async function loop(logUrl: Parameters<typeof pollOnce>[0]) {
       const name = logUrl.description
       while (!cancelled) {
+        if (pausedRef.current) {
+          await new Promise((r) => setTimeout(r, 500))
+          continue
+        }
         try {
           const cursor = cursors.has(name) ? cursors.get(name)! : null
           const result = await pollOnce(logUrl, cursor)
@@ -75,25 +88,45 @@ export default function LiveTicker() {
     }
   }, [])
 
+  function togglePause() {
+    setPaused((p) => {
+      const next = !p
+      // Resume from each log's current head so a long pause doesn't replay a backlog.
+      if (!next) cursorsRef.current.clear()
+      else setRate(0)
+      return next
+    })
+  }
+
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
       <div className="flex items-center gap-2.5 px-4 py-3 border-b border-slate-800">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
           <span
-            className={`w-1.5 h-1.5 rounded-full bg-emerald-400 ${live ? 'animate-pulse' : 'opacity-40'}`}
+            className={`w-1.5 h-1.5 rounded-full bg-emerald-400 ${
+              live && !paused ? 'animate-pulse' : 'opacity-40'
+            }`}
           />
           LIVE
         </span>
         <span className="text-xs text-slate-500">
-          {live ? `${rate} certs/sec` : 'connecting'}
+          {paused ? 'paused' : live ? `${rate} certs/sec` : 'connecting'}
           {logCount > 0 && ` across ${logCount} CT logs`}
         </span>
-        <Link
-          href="/feed"
-          className="ml-auto text-xs font-semibold text-emerald-400 hover:text-emerald-300"
-        >
-          Open full feed →
-        </Link>
+        <div className="ml-auto flex items-center gap-3">
+          <button
+            onClick={togglePause}
+            className="text-xs font-medium text-slate-400 hover:text-emerald-400 cursor-pointer transition-colors"
+          >
+            {paused ? 'Resume' : 'Pause'}
+          </button>
+          <Link
+            href="/feed"
+            className="text-xs font-semibold text-emerald-400 hover:text-emerald-300"
+          >
+            Open full feed →
+          </Link>
+        </div>
       </div>
       <div className="divide-y divide-slate-900">
         {rows.length === 0 ? (
