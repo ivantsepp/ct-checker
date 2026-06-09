@@ -302,6 +302,13 @@ export default function FeedPage() {
           </span>
         )}
 
+        <button
+          onClick={togglePause}
+          className="text-xs border border-slate-700 rounded-lg px-3.5 py-1.5 text-slate-300 hover:border-emerald-600 hover:text-emerald-400 cursor-pointer transition-colors"
+        >
+          {paused ? 'Resume' : 'Pause'}
+        </button>
+
         <span className="text-xs text-slate-500 ml-auto whitespace-nowrap">
           {rate}/s · {total.toLocaleString()} seen
           {skipped > 0 && ` · ${skipped.toLocaleString()} skipped`}
@@ -316,12 +323,6 @@ export default function FeedPage() {
               : 'border-slate-700 focus:border-emerald-600'
           }`}
         />
-        <button
-          onClick={togglePause}
-          className="text-xs border border-slate-700 rounded-lg px-3.5 py-1.5 text-slate-300 hover:border-emerald-600 hover:text-emerald-400 cursor-pointer transition-colors"
-        >
-          {paused ? 'Resume' : 'Pause'}
-        </button>
       </div>
 
       {/* Body */}

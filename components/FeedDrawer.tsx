@@ -70,7 +70,7 @@ export default function FeedDrawer({ cert, onClose }: { cert: FeedCert; onClose:
           </Link>
         ) : (
           <div className="mt-4 text-xs text-slate-500 bg-slate-800/60 border border-slate-700 rounded-lg p-3 leading-relaxed">
-            This is a <span className="text-amber-300">precertificate</span> log entry — a bare
+            This is a <span className="text-amber-300">precertificate</span>{" "}log entry - a bare
             TBSCertificate with no embedded SCTs, so it can&apos;t be run through the verifier.
             Verification works on the final (x509) certificate.
           </div>
