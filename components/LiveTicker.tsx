@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { getLogList } from '@/lib/log-list'
-import { streamLog, selectFeedLogs, type FeedCert, type LogStreamController } from '@/lib/ct-feed'
+import { streamLog, listUsableLogs, type FeedCert, type LogStreamController } from '@/lib/ct-feed'
 
 const ROWS = 6
 const POLL_INTERVAL = 5000
@@ -48,8 +48,11 @@ export default function LiveTicker() {
       try {
         const all = await getLogList()
         if (cancelled) return
-        // Two logs are enough for a lively preview without hammering endpoints.
-        const selected = selectFeedLogs(all, 6).filter((l) => l.logType !== 'tiled').slice(0, 2)
+        // Two RFC 6962 logs (CORS-ordered) are enough for a lively preview
+        // without hammering endpoints.
+        const selected = listUsableLogs(all)
+          .filter((l) => l.logType !== 'tiled')
+          .slice(0, 2)
         setLogCount(selected.length)
         for (const log of selected) {
           controllers.push(

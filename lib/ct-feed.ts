@@ -24,7 +24,7 @@ import { getSTH } from './ct-api'
 import { getSTHFromCheckpoint, dataTilePath } from './ct-static-api'
 import { ctFetch } from './transport'
 import { parseLeafCertFields } from './feed-cert'
-import { getOperatorCors } from './cors-memory'
+import { getOperatorCors } from './cors-operators'
 
 // ── Tuning ──────────────────────────────────────────────────────────────────
 
@@ -465,34 +465,15 @@ export function listUsableLogs(logs: CTLog[]): CTLog[] {
 }
 
 /**
- * Choose a manageable starting set of usable logs to monitor (users can add
- * more via the picker).  Orders by CORS preference — operators known to serve
- * CORS first, then unknown, then known-blocked — so a static deployment leads
- * with logs that actually work in the browser.  Within that, picks one log per
- * operator first for variety, then fills any remaining slots.
+ * The default starting set: one RFC 6962 log and one Sunlight (tiled) log, each
+ * the best CORS-ranked of its kind, so the feed demonstrates both protocols out
+ * of the box.  Users add more via the picker.  Ordered RFC-first.
  */
-export function selectFeedLogs(logs: CTLog[], max = 6): CTLog[] {
+export function selectFeedLogs(logs: CTLog[]): CTLog[] {
   const ranked = listUsableLogs(logs) // already CORS-ordered
-  const picked: CTLog[] = []
-  const seenOperators = new Set<string>()
-
-  // First pass: one log per operator (keeps the default set diverse).
-  for (const log of ranked) {
-    if (picked.length >= max) break
-    const op = log.operator ?? log.description
-    if (!seenOperators.has(op)) {
-      picked.push(log)
-      seenOperators.add(op)
-    }
-  }
-  // Second pass: fill remaining slots with the next-best leftovers.
-  if (picked.length < max) {
-    for (const log of ranked) {
-      if (picked.length >= max) break
-      if (!picked.includes(log)) picked.push(log)
-    }
-  }
-  return picked
+  const rfc = ranked.find((l) => l.logType !== 'tiled')
+  const tiled = ranked.find((l) => l.logType === 'tiled')
+  return [rfc, tiled].filter((l): l is CTLog => l !== undefined)
 }
 
 // ── Verifier hand-off ─────────────────────────────────────────────────────────

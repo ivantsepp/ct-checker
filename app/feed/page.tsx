@@ -12,8 +12,6 @@ import {
   type FeedCert,
   type LogStreamController,
 } from '@/lib/ct-feed'
-import { HAS_PROXY, CORSError } from '@/lib/transport'
-import { recordOperatorCors } from '@/lib/cors-memory'
 import NavBar from '@/components/NavBar'
 import FeedDrawer from '@/components/FeedDrawer'
 import LogPicker from '@/components/LogPicker'
@@ -101,17 +99,7 @@ export default function FeedPage() {
           pollInterval: POLL_INTERVAL,
           // Idle while globally paused or this log is individually disabled.
           isPaused: () => pausedRef.current || !enabledRef.current[name],
-          onStatus: (s) => {
-            setStatus(name, s)
-            // Static build only: a direct fetch that succeeds means this
-            // operator serves CORS; remember it to prioritize next time.
-            if (!HAS_PROXY && s === 'ok') recordOperatorCors(log.operator, 'ok')
-          },
-          onError: (err) => {
-            if (!HAS_PROXY && err instanceof CORSError) {
-              recordOperatorCors(log.operator, 'blocked')
-            }
-          },
+          onStatus: (s) => setStatus(name, s),
           onCerts: (c) => pushCerts(c),
           onSkip: (n) => setSkipped((x) => x + n),
         }),

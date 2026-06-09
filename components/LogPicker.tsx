@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react'
 import type { CTLog } from '@/types/ct'
-import { getOperatorCors } from '@/lib/cors-memory'
+import { getOperatorCors } from '@/lib/cors-operators'
 
 /**
  * Autocomplete combobox for adding a CT log to the feed.  `options` is the list
