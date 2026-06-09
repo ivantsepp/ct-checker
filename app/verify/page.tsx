@@ -1,8 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, Suspense } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import type { ParsedCert, ParsedSCT, SCTVerificationResult } from '@/types/ct'
 import { normalizeCertChainInput, parseCert } from '@/lib/cert-parser'
 import { resolveCert } from '@/lib/cert-handoff'
@@ -16,7 +15,7 @@ import { buildInclusionProof } from '@/lib/merkle'
 import { toHex } from '@/lib/sct-parser'
 import { HAS_PROXY, CORSError, ProxyError, LogUnavailableError, proxyUnreachableError, apiUrl, type ApiCall } from '@/lib/transport'
 import SCTCard from '@/components/SCTCard'
-import ThemeToggle from '@/components/ThemeToggle'
+import NavBar from '@/components/NavBar'
 
 type Phase =
   | 'fetching-cert'
@@ -138,7 +137,6 @@ function PhaseIndicator({ phase, sctCount }: { phase: Phase; sctCount: number })
 
 function VerifyInner() {
   const searchParams = useSearchParams()
-  const router = useRouter()
   const domainParam = searchParams.get('domain')
   const certParam = searchParams.get('cert')
 
@@ -380,29 +378,15 @@ function VerifyInner() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
-      {/* Nav */}
-      <header className="border-b border-slate-800 px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center gap-3">
-          <button
-            onClick={() => router.push('/')}
-            className="text-slate-400 hover:text-slate-200 transition-colors text-sm font-mono cursor-pointer"
-          >
-            ← back
-          </button>
-          <span className="text-slate-600">|</span>
-          <span className="text-emerald-400 font-mono text-lg font-bold">CT</span>
-          <span className="text-slate-400 font-mono text-sm truncate max-w-sm">{title}</span>
-          <Link
-            href="/feed"
-            className="ml-auto text-sm font-medium text-slate-400 hover:text-emerald-400 transition-colors"
-          >
-            Live Feed
-          </Link>
-          <ThemeToggle />
-        </div>
-      </header>
+      <NavBar />
 
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
+        {/* Heading */}
+        <div>
+          <h1 className="text-xl font-bold text-slate-50">Verify Certificate Transparency</h1>
+          <p className="text-sm text-slate-400 mt-1 font-mono truncate">{title}</p>
+        </div>
+
         {/* Progress */}
         <PhaseIndicator phase={state.phase} sctCount={state.scts.length} />
 

@@ -31,15 +31,17 @@ export default function NavBar({ wide = false }: { wide?: boolean }) {
 
         <nav className="flex items-center gap-1 ml-2">
           {LINKS.map(({ href, label }) => {
-            const active = href === '/' ? pathname === '/' : pathname.startsWith(href)
+            // The "Verify" link points at home but also owns the /verify flow.
+            const active =
+              href === '/' ? pathname === '/' || pathname.startsWith('/verify') : pathname.startsWith(href)
             return (
               <Link
                 key={href}
                 href={href}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`px-3.5 py-1.5 rounded-full text-sm font-medium border transition-colors ${
                   active
-                    ? 'text-emerald-400 bg-emerald-500/10'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                    ? 'text-emerald-400 bg-emerald-500/10 border-emerald-600/50'
+                    : 'text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
                 {label}

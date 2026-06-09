@@ -484,13 +484,31 @@ function corsRank(log: CTLog): number {
 }
 
 /**
+ * Operators to push to the back of the default selection. Geomys rate-limits
+ * aggressively unless the client sends a contact email in the User-Agent —
+ * which a browser cannot set — so we prefer other operators (e.g. IPng
+ * Networks) for the default tiled log. Geomys logs are still listed in the
+ * picker; this only affects ordering / the out-of-the-box pick.
+ */
+const DEPRIORITIZED_OPERATORS = new Set(['Geomys'])
+
+function operatorRank(log: CTLog): number {
+  return DEPRIORITIZED_OPERATORS.has(log.operator ?? '') ? 1 : 0
+}
+
+/**
  * All currently-usable logs, ordered by CORS preference then description — the
  * candidate list for the "add a log" picker.
  */
 export function listUsableLogs(logs: CTLog[]): CTLog[] {
   return logs
     .filter(isUsableNow)
-    .sort((a, b) => corsRank(a) - corsRank(b) || a.description.localeCompare(b.description))
+    .sort(
+      (a, b) =>
+        corsRank(a) - corsRank(b) ||
+        operatorRank(a) - operatorRank(b) ||
+        a.description.localeCompare(b.description),
+    )
 }
 
 /**
