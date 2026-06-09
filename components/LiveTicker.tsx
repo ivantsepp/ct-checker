@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { getLogList } from '@/lib/log-list'
-import { streamLog, listUsableLogs, type FeedCert, type LogStreamController } from '@/lib/ct-feed'
+import {
+  streamLog,
+  listUsableLogs,
+  FEED_POLL_INTERVAL_MS,
+  type FeedCert,
+  type LogStreamController,
+} from '@/lib/ct-feed'
+import { IS_STATIC_BUILD } from '@/lib/transport'
 
 const ROWS = 6
 
@@ -23,11 +30,14 @@ export default function LiveTicker() {
   const rateRef = useRef(0)
   const [rate, setRate] = useState(0)
   const [logCount, setLogCount] = useState(0)
+  // Seconds until the next poll (static builds only, where polling is slow).
+  const [countdown, setCountdown] = useState<number | null>(null)
 
   // Read inside the long-lived poll loops (avoids stale closures).
   const pausedRef = useRef(false)
   const seenRef = useRef<Set<string>>(new Set())
   const controllersRef = useRef<LogStreamController[]>([])
+  const nextPollRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
     pausedRef.current = paused
@@ -41,6 +51,16 @@ export default function LiveTicker() {
     const rateId = setInterval(() => {
       setRate(rateRef.current)
       rateRef.current = 0
+      // Countdown to the soonest scheduled poll (static builds only).
+      if (!IS_STATIC_BUILD) return
+      if (pausedRef.current) {
+        setCountdown(null)
+        return
+      }
+      const times = [...nextPollRef.current.values()]
+      setCountdown(
+        times.length ? Math.max(0, Math.round((Math.min(...times) - Date.now()) / 1000)) : null,
+      )
     }, 1000)
 
     ;(async () => {
@@ -58,6 +78,7 @@ export default function LiveTicker() {
             streamLog(log, {
               // pollInterval defaults to a build-aware cadence (slower on static).
               isPaused: () => pausedRef.current,
+              onSchedule: (at) => nextPollRef.current.set(log.description, at),
               onCerts: (certs) => {
                 const fresh = certs.filter((c) => !seen.has(c.id))
                 for (const c of fresh) seen.add(c.id)
@@ -103,9 +124,30 @@ export default function LiveTicker() {
           />
           LIVE
         </span>
-        <span className="text-xs text-slate-500">
-          {paused ? 'paused' : live ? `${rate} certs/sec` : 'connecting'}
-          {logCount > 0 && ` across ${logCount} CT logs`}
+        <span className="text-xs text-slate-500 inline-flex items-center gap-1.5 whitespace-nowrap">
+          {paused ? (
+            <>paused{logCount > 0 ? ` · ${logCount} CT logs` : ''}</>
+          ) : IS_STATIC_BUILD && countdown !== null ? (
+            <>
+              <span className="tabular-nums">
+                next poll {countdown === 0 ? 'now…' : `in ${countdown}s`}
+              </span>
+              <span className="relative h-1 w-10 rounded-full bg-slate-800 overflow-hidden">
+                <span
+                  className="absolute inset-y-0 left-0 bg-emerald-500/70 transition-[width] duration-1000 ease-linear"
+                  style={{
+                    width: `${Math.min(100, Math.max(0, (1 - countdown / (FEED_POLL_INTERVAL_MS / 1000)) * 100))}%`,
+                  }}
+                />
+              </span>
+              {logCount > 0 ? `· ${logCount} logs` : ''}
+            </>
+          ) : (
+            <>
+              {live ? `${rate} certs/sec` : 'connecting'}
+              {logCount > 0 ? ` across ${logCount} CT logs` : ''}
+            </>
+          )}
         </span>
         <div className="ml-auto flex items-center gap-3">
           <button
