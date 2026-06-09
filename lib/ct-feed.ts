@@ -24,6 +24,7 @@ import { getSTH } from './ct-api'
 import { getSTHFromCheckpoint, dataTilePath } from './ct-static-api'
 import { ctFetch } from './transport'
 import { parseLeafCertFields } from './feed-cert'
+import { getOperatorCors } from './cors-memory'
 
 // ── Tuning ──────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,8 @@ export interface LogStreamOptions {
   onCerts: (certs: FeedCert[]) => void
   /** Poll lifecycle, for status dots. */
   onStatus?: (status: FeedStatus) => void
+  /** A poll failed — receives the thrown error (e.g. CORSError) for diagnosis. */
+  onError?: (err: unknown) => void
   /** Entries skipped because the log outran us (flood guard). */
   onSkip?: (skipped: number) => void
   /** Loop idles (no fetches) while this returns true. */
@@ -414,9 +417,10 @@ export function streamLog(log: CTLog, opts: LogStreamOptions): LogStreamControll
         // Made progress and still behind → keep draining without re-checking the
         // head (no STH fetch, since cursor < knownTreeSize) and without waiting.
         if (cursor > before && cursor < knownTreeSize) continue
-      } catch {
+      } catch (err) {
         if (cancelled) return
         opts.onStatus?.('err')
+        opts.onError?.(err)
       }
       await sleep(pollInterval)
     }
@@ -444,18 +448,51 @@ function isUsableNow(log: CTLog): boolean {
   return (!Number.isFinite(start) || now >= start) && (!Number.isFinite(end) || now < end)
 }
 
+/** CORS preference: operators we've seen work first, unknown next, blocked last. */
+function corsRank(log: CTLog): number {
+  const status = getOperatorCors(log.operator)
+  return status === 'ok' ? 0 : status === undefined ? 1 : 2
+}
+
 /**
- * Choose a manageable set of currently-usable logs to monitor.  Prefers RFC
- * 6962 logs first (Google's serve CORS, so they also work in the static build)
- * and includes a couple of tiled logs for protocol variety, capped so the feed
- * isn't hammering dozens of endpoints.
+ * All currently-usable logs, ordered by CORS preference then description — the
+ * candidate list for the "add a log" picker.
+ */
+export function listUsableLogs(logs: CTLog[]): CTLog[] {
+  return logs
+    .filter(isUsableNow)
+    .sort((a, b) => corsRank(a) - corsRank(b) || a.description.localeCompare(b.description))
+}
+
+/**
+ * Choose a manageable starting set of usable logs to monitor (users can add
+ * more via the picker).  Orders by CORS preference — operators known to serve
+ * CORS first, then unknown, then known-blocked — so a static deployment leads
+ * with logs that actually work in the browser.  Within that, picks one log per
+ * operator first for variety, then fills any remaining slots.
  */
 export function selectFeedLogs(logs: CTLog[], max = 6): CTLog[] {
-  const usable = logs.filter(isUsableNow)
-  const rfc = usable.filter((l) => l.logType !== 'tiled')
-  const tiled = usable.filter((l) => l.logType === 'tiled')
-  const tiledQuota = Math.min(2, tiled.length)
-  return [...rfc.slice(0, max - tiledQuota), ...tiled.slice(0, tiledQuota)]
+  const ranked = listUsableLogs(logs) // already CORS-ordered
+  const picked: CTLog[] = []
+  const seenOperators = new Set<string>()
+
+  // First pass: one log per operator (keeps the default set diverse).
+  for (const log of ranked) {
+    if (picked.length >= max) break
+    const op = log.operator ?? log.description
+    if (!seenOperators.has(op)) {
+      picked.push(log)
+      seenOperators.add(op)
+    }
+  }
+  // Second pass: fill remaining slots with the next-best leftovers.
+  if (picked.length < max) {
+    for (const log of ranked) {
+      if (picked.length >= max) break
+      if (!picked.includes(log)) picked.push(log)
+    }
+  }
+  return picked
 }
 
 // ── Verifier hand-off ─────────────────────────────────────────────────────────

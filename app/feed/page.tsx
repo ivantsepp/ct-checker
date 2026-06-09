@@ -7,12 +7,16 @@ import { getLogList } from '@/lib/log-list'
 import {
   streamLog,
   selectFeedLogs,
+  listUsableLogs,
   verifyHref,
   type FeedCert,
   type LogStreamController,
 } from '@/lib/ct-feed'
+import { HAS_PROXY, CORSError } from '@/lib/transport'
+import { recordOperatorCors } from '@/lib/cors-memory'
 import NavBar from '@/components/NavBar'
 import FeedDrawer from '@/components/FeedDrawer'
+import LogPicker from '@/components/LogPicker'
 
 type Status = 'idle' | 'poll' | 'ok' | 'err'
 
@@ -34,6 +38,7 @@ export default function FeedPage() {
   const router = useRouter()
 
   const [logs, setLogs] = useState<CTLog[]>([])
+  const [allUsable, setAllUsable] = useState<CTLog[]>([])
   const [statuses, setStatuses] = useState<Record<string, Status>>({})
   const [enabled, setEnabled] = useState<Record<string, boolean>>({})
   const [certs, setCerts] = useState<FeedCert[]>([])
@@ -85,6 +90,36 @@ export default function FeedPage() {
     return () => clearInterval(id)
   }, [])
 
+  // Start a polling loop for one log (idempotent per log description).
+  const startLog = useCallback(
+    (log: CTLog) => {
+      const name = log.description
+      if (controllersRef.current.has(name)) return
+      controllersRef.current.set(
+        name,
+        streamLog(log, {
+          pollInterval: POLL_INTERVAL,
+          // Idle while globally paused or this log is individually disabled.
+          isPaused: () => pausedRef.current || !enabledRef.current[name],
+          onStatus: (s) => {
+            setStatus(name, s)
+            // Static build only: a direct fetch that succeeds means this
+            // operator serves CORS; remember it to prioritize next time.
+            if (!HAS_PROXY && s === 'ok') recordOperatorCors(log.operator, 'ok')
+          },
+          onError: (err) => {
+            if (!HAS_PROXY && err instanceof CORSError) {
+              recordOperatorCors(log.operator, 'blocked')
+            }
+          },
+          onCerts: (c) => pushCerts(c),
+          onSkip: (n) => setSkipped((x) => x + n),
+        }),
+      )
+    },
+    [setStatus, pushCerts],
+  )
+
   // ── Boot the pollers ──────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
@@ -94,6 +129,7 @@ export default function FeedPage() {
       try {
         const all = await getLogList()
         if (cancelled) return
+        setAllUsable(listUsableLogs(all))
         const selected = selectFeedLogs(all)
         if (!selected.length) {
           setLoadError('No currently-usable CT logs found in the log list.')
@@ -110,20 +146,7 @@ export default function FeedPage() {
         setEnabled(initEnabled)
         setStatuses(initStatus)
 
-        for (const log of selected) {
-          const name = log.description
-          controllers.set(
-            log.description,
-            streamLog(log, {
-              pollInterval: POLL_INTERVAL,
-              // Idle while globally paused or this log is individually disabled.
-              isPaused: () => pausedRef.current || !enabledRef.current[name],
-              onStatus: (s) => setStatus(name, s),
-              onCerts: (c) => pushCerts(c),
-              onSkip: (n) => setSkipped((x) => x + n),
-            }),
-          )
-        }
+        for (const log of selected) startLog(log)
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e))
       }
@@ -134,9 +157,23 @@ export default function FeedPage() {
       for (const c of controllers.values()) c.stop()
       controllers.clear()
     }
-  }, [setStatus, pushCerts])
+  }, [startLog])
 
   // ── Controls ──────────────────────────────────────────────────────────────────
+  function addLog(log: CTLog) {
+    const name = log.description
+    if (controllersRef.current.has(name)) {
+      // Already monitored — just (re-)enable it.
+      if (!enabledRef.current[name]) toggleLog(name)
+      return
+    }
+    enabledRef.current = { ...enabledRef.current, [name]: true }
+    setEnabled((prev) => ({ ...prev, [name]: true }))
+    setStatus(name, 'idle')
+    setLogs((prev) => [...prev, log])
+    startLog(log)
+  }
+
   function toggleLog(name: string) {
     setEnabled((prev) => {
       const next = { ...prev, [name]: !prev[name] }
@@ -184,6 +221,12 @@ export default function FeedPage() {
     return certs.filter((c) => c.domains.some((d) => filterRe.test(d)))
   }, [certs, filterRe])
 
+  // Logs available to add: usable logs not already monitored.
+  const pickerOptions = useMemo(() => {
+    const monitored = new Set(logs.map((l) => l.description))
+    return allUsable.filter((l) => !monitored.has(l.description))
+  }, [allUsable, logs])
+
   const selected = selectedId ? certs.find((c) => c.id === selectedId) ?? null : null
 
   return (
@@ -227,6 +270,8 @@ export default function FeedPage() {
             </button>
           )
         })}
+
+        <LogPicker options={pickerOptions} onAdd={addLog} />
 
         <span className="text-xs text-slate-500 ml-auto whitespace-nowrap">
           {rate}/s · {total.toLocaleString()} seen
