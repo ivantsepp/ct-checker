@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import type { ParsedCert, ParsedSCT, SCTVerificationResult } from '@/types/ct'
 import { normalizeCertChainInput, parseCert } from '@/lib/cert-parser'
+import { resolveCert } from '@/lib/cert-handoff'
 import { fetchIssuerFromAIA } from '@/lib/aia-fetch'
 import { parseSCTList } from '@/lib/sct-parser'
 import { getLogList, enrichSCT, logState } from '@/lib/log-list'
@@ -192,7 +193,7 @@ function VerifyInner() {
             issuerCertDER = Uint8Array.from(atob(data.issuerDER), (c) => c.charCodeAt(0))
           }
         } else {
-          const raw = atob(certParam!)
+          const raw = atob(resolveCert(certParam!))
           const chain = normalizeCertChainInput(raw)
           certDER = chain[0]
           // If the user pasted a chain (leaf + issuer), the second cert is the

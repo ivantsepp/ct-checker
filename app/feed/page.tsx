@@ -14,6 +14,7 @@ import {
   type LogStreamController,
 } from '@/lib/ct-feed'
 import { IS_STATIC_BUILD } from '@/lib/transport'
+import { resolveVerifyHref } from '@/lib/cert-handoff'
 import NavBar from '@/components/NavBar'
 import FeedDrawer from '@/components/FeedDrawer'
 import LogPicker from '@/components/LogPicker'
@@ -387,7 +388,9 @@ export default function FeedPage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            router.push(href)
+                            // Spill oversized certs to sessionStorage so the
+                            // URL stays under static-host limits (414).
+                            router.push(resolveVerifyHref(href))
                           }}
                           className="opacity-0 group-hover:opacity-100 text-xs font-semibold text-emerald-400 border border-emerald-700 rounded px-2 py-0.5 hover:bg-emerald-500/10 cursor-pointer transition-opacity"
                         >

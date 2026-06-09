@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { HAS_PROXY } from '@/lib/transport'
+import { stashCertB64 } from '@/lib/cert-handoff'
 import NavBar from '@/components/NavBar'
 import LiveTicker from '@/components/LiveTicker'
 
@@ -26,7 +27,9 @@ export default function Home() {
     } else {
       const c = cert.trim()
       if (!c) { setError('Paste a certificate'); return }
-      router.push(`/verify?cert=${encodeURIComponent(btoa(c))}`)
+      // Large certs (VMC/BIMI with embedded logos) overflow the URL on static
+      // hosts; stashCertB64 spills those to sessionStorage and returns a handle.
+      router.push(`/verify?cert=${encodeURIComponent(stashCertB64(btoa(c)))}`)
     }
   }
 
