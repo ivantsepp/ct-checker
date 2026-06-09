@@ -9,9 +9,11 @@ import {
   selectFeedLogs,
   listUsableLogs,
   verifyHref,
+  FEED_POLL_INTERVAL_MS,
   type FeedCert,
   type LogStreamController,
 } from '@/lib/ct-feed'
+import { IS_STATIC_BUILD } from '@/lib/transport'
 import NavBar from '@/components/NavBar'
 import FeedDrawer from '@/components/FeedDrawer'
 import LogPicker from '@/components/LogPicker'
@@ -46,6 +48,8 @@ export default function FeedPage() {
   const [total, setTotal] = useState(0)
   const [skipped, setSkipped] = useState(0)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // Seconds until the next poll (static builds only, where polling is slow).
+  const [countdown, setCountdown] = useState<number | null>(null)
 
   // Refs read inside the long-lived poll loops (avoid stale closures).
   const pausedRef = useRef(false)
@@ -53,6 +57,8 @@ export default function FeedPage() {
   const controllersRef = useRef<Map<string, LogStreamController>>(new Map())
   const seenRef = useRef<Set<string>>(new Set())
   const rateCounterRef = useRef(0)
+  // Per-log scheduled next-poll time (epoch ms) → soonest drives the countdown.
+  const nextPollRef = useRef<Map<string, number>>(new Map())
 
   useEffect(() => {
     pausedRef.current = paused
@@ -78,11 +84,24 @@ export default function FeedPage() {
     setCerts((prev) => [...fresh.reverse(), ...prev].slice(0, MAX_ROWS))
   }, [])
 
-  // ── Rate ticker ─────────────────────────────────────────────────────────────
+  // ── Rate + countdown ticker ───────────────────────────────────────────────────
   useEffect(() => {
     const id = setInterval(() => {
       setRate(rateCounterRef.current)
       rateCounterRef.current = 0
+
+      // Countdown to the soonest scheduled poll among enabled logs (static only).
+      if (!IS_STATIC_BUILD) return
+      if (pausedRef.current) {
+        setCountdown(null)
+        return
+      }
+      const times = [...nextPollRef.current]
+        .filter(([name]) => enabledRef.current[name])
+        .map(([, at]) => at)
+      setCountdown(
+        times.length ? Math.max(0, Math.round((Math.min(...times) - Date.now()) / 1000)) : null,
+      )
     }, 1000)
     return () => clearInterval(id)
   }, [])
@@ -101,6 +120,7 @@ export default function FeedPage() {
           onStatus: (s) => setStatus(name, s),
           onCerts: (c) => pushCerts(c),
           onSkip: (n) => setSkipped((x) => x + n),
+          onSchedule: (at) => nextPollRef.current.set(name, at),
         }),
       )
     },
@@ -259,6 +279,27 @@ export default function FeedPage() {
         })}
 
         <LogPicker options={pickerOptions} onAdd={addLog} />
+
+        {/* Static builds poll slowly (rate-limit friendly) — a countdown keeps
+            the wait between refreshes feeling intentional rather than frozen. */}
+        {IS_STATIC_BUILD && countdown !== null && !paused && (
+          <span
+            className="inline-flex items-center gap-2 text-xs text-slate-500"
+            title="The static build polls slowly to stay within CT log rate limits"
+          >
+            <span className="tabular-nums">
+              next poll {countdown === 0 ? 'now…' : `in ${countdown}s`}
+            </span>
+            <span className="relative h-1 w-14 rounded-full bg-slate-800 overflow-hidden">
+              <span
+                className="absolute inset-y-0 left-0 bg-emerald-500/70 transition-[width] duration-1000 ease-linear"
+                style={{
+                  width: `${Math.min(100, Math.max(0, (1 - countdown / (FEED_POLL_INTERVAL_MS / 1000)) * 100))}%`,
+                }}
+              />
+            </span>
+          </span>
+        )}
 
         <span className="text-xs text-slate-500 ml-auto whitespace-nowrap">
           {rate}/s · {total.toLocaleString()} seen

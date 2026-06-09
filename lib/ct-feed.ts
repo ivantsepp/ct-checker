@@ -51,6 +51,9 @@ const DEFAULT_POLL_INTERVAL = IS_STATIC_BUILD ? 30_000 : 5_000
 /** Cap for exponential backoff after repeated poll failures (ms). */
 const MAX_BACKOFF = 60_000
 
+/** The default poll interval, exposed so the UI can render a countdown. */
+export const FEED_POLL_INTERVAL_MS = DEFAULT_POLL_INTERVAL
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface FeedCert {
@@ -92,6 +95,8 @@ export interface LogStreamOptions {
   onError?: (err: unknown) => void
   /** Entries skipped because the log outran us (flood guard). */
   onSkip?: (skipped: number) => void
+  /** When the next poll is scheduled (epoch ms) — drives the static countdown. */
+  onSchedule?: (nextPollAtMs: number) => void
   /** Loop idles (no fetches) while this returns true. */
   isPaused?: () => boolean
   /** Wait between head checks once caught up (ms). */
@@ -441,9 +446,11 @@ export function streamLog(log: CTLog, opts: LogStreamOptions): LogStreamControll
         const retryAfter = err instanceof LogHttpError ? err.retryAfterMs : undefined
         const wait = retryAfter ?? backoff
         if (retryAfter === undefined) backoff = Math.min(backoff * 2, MAX_BACKOFF)
+        opts.onSchedule?.(Date.now() + wait)
         await sleep(wait)
         continue
       }
+      opts.onSchedule?.(Date.now() + pollInterval)
       await sleep(pollInterval)
     }
   })()
