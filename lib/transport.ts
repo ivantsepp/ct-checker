@@ -107,6 +107,34 @@ export class LogUnavailableError extends Error {
   }
 }
 
+/**
+ * Thrown when the CT log (via the proxy, or directly) responds with an HTTP
+ * error status — most importantly 429 Too Many Requests.  Carries the status
+ * and, when the server sent a `Retry-After`, the suggested delay in ms, so the
+ * feed's poll loop can back off appropriately.
+ */
+export class LogHttpError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly retryAfterMs?: number,
+    cause?: unknown,
+  ) {
+    super(message)
+    this.name = 'LogHttpError'
+    if (cause) (this as Error & { cause?: unknown }).cause = cause
+  }
+}
+
+/** Parse a `Retry-After` header (delta-seconds or HTTP-date) to milliseconds. */
+export function parseRetryAfter(value: string | null | undefined): number | undefined {
+  if (!value) return undefined
+  const secs = Number(value)
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000)
+  const when = Date.parse(value)
+  return Number.isFinite(when) ? Math.max(0, when - Date.now()) : undefined
+}
+
 /** Build the generic "proxy unreachable" error (opaque cross-origin failure). */
 export function proxyUnreachableError(cause?: unknown): ProxyError {
   const where = PROXY_BASE || 'the proxy backend'
@@ -263,7 +291,13 @@ export async function ctFetch(
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       record({ ok: false, status: res.status, error: body.slice(0, 200) }, target, 'direct')
-      throw new Error(`Log ${logUrl} returned ${res.status}: ${body.slice(0, 200)}`)
+      // Retry-After is only readable cross-origin if the log CORS-exposes it
+      // (most don't) — the feed falls back to exponential backoff when absent.
+      throw new LogHttpError(
+        `Log ${logUrl} returned ${res.status}: ${body.slice(0, 200)}`,
+        res.status,
+        parseRetryAfter(res.headers.get('retry-after')),
+      )
     }
 
     if (shape === 'json') {
@@ -308,13 +342,19 @@ export async function ctFetch(
       if (isJson) {
         // A JSON error means our handler ran and responded — the proxy is
         // healthy, so this is NOT a proxy outage. It's an upstream/log error.
-        const data = (await res.json().catch(() => null)) as { error?: string; code?: string } | null
+        const data = (await res.json().catch(() => null)) as
+          | { error?: string; code?: string; retryAfter?: string }
+          | null
         const msg = data?.error ?? `HTTP ${res.status}`
         record({ ok: false, status: res.status, error: msg.slice(0, 200) }, url, 'proxy')
         if (data?.code === 'UPSTREAM_UNREACHABLE') {
           throw new LogUnavailableError(logUrl, msg)
         }
-        throw new Error(`CT proxy ${res.status}: ${msg.slice(0, 200)}`)
+        throw new LogHttpError(
+          `CT proxy ${res.status}: ${msg.slice(0, 200)}`,
+          res.status,
+          parseRetryAfter(data?.retryAfter),
+        )
       }
       await res.text().catch(() => '')
       const friendly = proxyStatusMessage(res.status) ?? `Proxy backend error (HTTP ${res.status}).`

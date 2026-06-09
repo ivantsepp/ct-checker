@@ -22,7 +22,7 @@ import type { CTLog } from '@/types/ct'
 import { fromBase64 } from './sct-parser'
 import { getSTH } from './ct-api'
 import { getSTHFromCheckpoint, dataTilePath } from './ct-static-api'
-import { ctFetch, IS_STATIC_BUILD } from './transport'
+import { ctFetch, IS_STATIC_BUILD, LogHttpError } from './transport'
 import { parseLeafCertFields } from './feed-cert'
 import { getOperatorCors } from './cors-operators'
 
@@ -48,6 +48,8 @@ const DEFAULT_MAX_LAG = 256
  * afford a snappier cadence.
  */
 const DEFAULT_POLL_INTERVAL = IS_STATIC_BUILD ? 30_000 : 5_000
+/** Cap for exponential backoff after repeated poll failures (ms). */
+const MAX_BACKOFF = 60_000
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -337,9 +339,14 @@ async function fetchBatchTiled(
     bytes = (await ctFetch(log.url, dataTilePath(tileIdx, isPartial ? entriesInTile : undefined)))
       .bytes
   } catch (e) {
-    // Some logs serve partial tiles at the full-tile URL too — retry without .p
-    if (!isPartial) throw e
-    bytes = (await ctFetch(log.url, dataTilePath(tileIdx))).bytes
+    // Some logs serve partial tiles at the full-tile URL instead — retry without
+    // the `.p` suffix only when the partial URL is genuinely absent (404). On a
+    // 429 / other error the fallback would just double the request, so re-throw.
+    if (isPartial && e instanceof LogHttpError && e.status === 404) {
+      bytes = (await ctFetch(log.url, dataTilePath(tileIdx))).bytes
+    } else {
+      throw e
+    }
   }
   if (!bytes) return { certs: [], cursor }
 
@@ -376,6 +383,7 @@ export function streamLog(log: CTLog, opts: LogStreamOptions): LogStreamControll
   let reseed = false
   let cursor: number | null = null
   let knownTreeSize: number | undefined
+  let backoff = pollInterval // grows on consecutive failures, resets on success
 
   ;(async () => {
     while (!cancelled) {
@@ -418,6 +426,7 @@ export function streamLog(log: CTLog, opts: LogStreamOptions): LogStreamControll
           if (res.certs.length) opts.onCerts(res.certs)
         }
         opts.onStatus?.('ok')
+        backoff = pollInterval // recovered — clear any escalated backoff
 
         // Made progress and still behind → keep draining without re-checking the
         // head (no STH fetch, since cursor < knownTreeSize) and without waiting.
@@ -426,6 +435,14 @@ export function streamLog(log: CTLog, opts: LogStreamOptions): LogStreamControll
         if (cancelled) return
         opts.onStatus?.('err')
         opts.onError?.(err)
+        // Back off so we stop hammering a rate-limited or down log: honor a
+        // server Retry-After (429) when present, otherwise escalate
+        // exponentially up to MAX_BACKOFF.
+        const retryAfter = err instanceof LogHttpError ? err.retryAfterMs : undefined
+        const wait = retryAfter ?? backoff
+        if (retryAfter === undefined) backoff = Math.min(backoff * 2, MAX_BACKOFF)
+        await sleep(wait)
+        continue
       }
       await sleep(pollInterval)
     }

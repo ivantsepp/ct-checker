@@ -151,8 +151,12 @@ export async function GET(request: NextRequest) {
       const body = await readBodyCapped(res, 64 * 1024)
         .then((b) => new TextDecoder().decode(b))
         .catch(() => '')
+      // Forward the upstream Retry-After (e.g. on 429) so the client can honor
+      // it — response headers don't survive the JSON re-encoding, so pass the
+      // raw value in the body.
+      const retryAfter = res.headers.get('retry-after') ?? undefined
       return json(
-        { error: `Log returned ${res.status}: ${body.slice(0, 200)}` },
+        { error: `Log returned ${res.status}: ${body.slice(0, 200)}`, retryAfter },
         { status: res.status },
       )
     }
