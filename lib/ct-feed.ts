@@ -22,7 +22,7 @@ import type { CTLog } from '@/types/ct'
 import { fromBase64 } from './sct-parser'
 import { getSTH } from './ct-api'
 import { getSTHFromCheckpoint, dataTilePath } from './ct-static-api'
-import { ctFetch } from './transport'
+import { ctFetch, IS_STATIC_BUILD } from './transport'
 import { parseLeafCertFields } from './feed-cert'
 import { getOperatorCors } from './cors-operators'
 
@@ -41,8 +41,13 @@ const TILE_WIDTH = 256
 const EDGE_WINDOW = 32
 /** Drain at most this many entries behind the head before jumping to it. */
 const DEFAULT_MAX_LAG = 256
-/** Wait between head checks once caught up (ms). */
-const DEFAULT_POLL_INTERVAL = 5000
+/**
+ * Wait between head checks once caught up (ms).  Static deployments fetch logs
+ * directly from many browsers (or through a shared remote proxy), so they poll
+ * slowly to avoid 429 rate-limiting; the same-origin dev/dynamic proxy can
+ * afford a snappier cadence.
+ */
+const DEFAULT_POLL_INTERVAL = IS_STATIC_BUILD ? 30_000 : 5_000
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

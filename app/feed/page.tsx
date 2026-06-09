@@ -19,7 +19,6 @@ import LogPicker from '@/components/LogPicker'
 type Status = 'idle' | 'poll' | 'ok' | 'err'
 
 const MAX_ROWS = 400
-const POLL_INTERVAL = 6000
 
 function fmtTime(ts: number): string {
   return new Date(ts).toISOString().slice(11, 23) // HH:MM:SS.mmm
@@ -96,7 +95,7 @@ export default function FeedPage() {
       controllersRef.current.set(
         name,
         streamLog(log, {
-          pollInterval: POLL_INTERVAL,
+          // pollInterval defaults to a build-aware cadence (slower on static).
           // Idle while globally paused or this log is individually disabled.
           isPaused: () => pausedRef.current || !enabledRef.current[name],
           onStatus: (s) => setStatus(name, s),

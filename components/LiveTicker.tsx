@@ -6,7 +6,6 @@ import { getLogList } from '@/lib/log-list'
 import { streamLog, listUsableLogs, type FeedCert, type LogStreamController } from '@/lib/ct-feed'
 
 const ROWS = 6
-const POLL_INTERVAL = 5000
 
 function fmtTime(ts: number): string {
   return new Date(ts).toISOString().slice(11, 19) // HH:MM:SS
@@ -57,7 +56,7 @@ export default function LiveTicker() {
         for (const log of selected) {
           controllers.push(
             streamLog(log, {
-              pollInterval: POLL_INTERVAL,
+              // pollInterval defaults to a build-aware cadence (slower on static).
               isPaused: () => pausedRef.current,
               onCerts: (certs) => {
                 const fresh = certs.filter((c) => !seen.has(c.id))
