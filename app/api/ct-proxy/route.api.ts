@@ -131,7 +131,10 @@ export async function GET(request: NextRequest) {
   try {
     const res = await fetch(target, {
       headers: {
-        'User-Agent': 'CTVerifier/1.0',
+        // Some logs (e.g. Geomys/Sunlight) rate-limit requests whose User-Agent
+        // lacks a contact email, returning 429 "Please add an email address to
+        // your User-Agent". Include one to get the normal rate limit.
+        'User-Agent': 'CTVerifier/1.0 (ivan.tse1@gmail.com)',
         // For JSON endpoints request JSON explicitly; for others accept anything
         Accept: responseType === 'json' ? 'application/json' : '*/*',
       },

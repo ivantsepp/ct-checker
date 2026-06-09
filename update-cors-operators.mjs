@@ -48,7 +48,7 @@ function isUsable(log) {
 /** Fetch a read endpoint with an Origin header; true if it serves a usable ACAO. */
 async function servesCors(url) {
   const res = await fetch(url, {
-    headers: { Origin: ORIGIN, 'User-Agent': 'ct-checker-cors-probe/1.0' },
+    headers: { Origin: ORIGIN, 'User-Agent': 'ct-checker-cors-probe/1.0 (ivan.tse1@gmail.com)' },
     redirect: 'manual',
     signal: AbortSignal.timeout(TIMEOUT_MS),
   })
