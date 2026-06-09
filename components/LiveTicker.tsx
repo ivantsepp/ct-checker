@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { getLogList } from '@/lib/log-list'
-import { pollOnce, selectFeedLogs, type FeedCert } from '@/lib/ct-feed'
+import { streamLog, selectFeedLogs, type FeedCert, type LogStreamController } from '@/lib/ct-feed'
 
 const ROWS = 6
 const POLL_INTERVAL = 5000
@@ -27,7 +27,8 @@ export default function LiveTicker() {
 
   // Read inside the long-lived poll loops (avoids stale closures).
   const pausedRef = useRef(false)
-  const cursorsRef = useRef<Map<string, number | null>>(new Map())
+  const seenRef = useRef<Set<string>>(new Set())
+  const controllersRef = useRef<LogStreamController[]>([])
 
   useEffect(() => {
     pausedRef.current = paused
@@ -35,39 +36,13 @@ export default function LiveTicker() {
 
   useEffect(() => {
     let cancelled = false
-    const cursors = cursorsRef.current
-    const seen = new Set<string>()
+    const controllers = controllersRef.current
+    const seen = seenRef.current
 
     const rateId = setInterval(() => {
       setRate(rateRef.current)
       rateRef.current = 0
     }, 1000)
-
-    async function loop(logUrl: Parameters<typeof pollOnce>[0]) {
-      const name = logUrl.description
-      while (!cancelled) {
-        if (pausedRef.current) {
-          await new Promise((r) => setTimeout(r, 500))
-          continue
-        }
-        try {
-          const cursor = cursors.has(name) ? cursors.get(name)! : null
-          const result = await pollOnce(logUrl, cursor)
-          if (cancelled) return
-          cursors.set(name, result.cursor)
-          const fresh = result.certs.filter((c) => !seen.has(c.id))
-          for (const c of fresh) seen.add(c.id)
-          if (fresh.length) {
-            setLive(true)
-            rateRef.current += fresh.length
-            setRows((prev) => [...fresh.reverse(), ...prev].slice(0, ROWS))
-          }
-        } catch {
-          // Ignore transient/CORS errors in the preview; the full feed surfaces them.
-        }
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL))
-      }
-    }
 
     ;(async () => {
       try {
@@ -76,7 +51,22 @@ export default function LiveTicker() {
         // Two logs are enough for a lively preview without hammering endpoints.
         const selected = selectFeedLogs(all, 6).filter((l) => l.logType !== 'tiled').slice(0, 2)
         setLogCount(selected.length)
-        selected.forEach(loop)
+        for (const log of selected) {
+          controllers.push(
+            streamLog(log, {
+              pollInterval: POLL_INTERVAL,
+              isPaused: () => pausedRef.current,
+              onCerts: (certs) => {
+                const fresh = certs.filter((c) => !seen.has(c.id))
+                for (const c of fresh) seen.add(c.id)
+                if (!fresh.length) return
+                setLive(true)
+                rateRef.current += fresh.length
+                setRows((prev) => [...fresh.reverse(), ...prev].slice(0, ROWS))
+              },
+            }),
+          )
+        }
       } catch {
         // Leave the ticker in its placeholder state.
       }
@@ -85,15 +75,17 @@ export default function LiveTicker() {
     return () => {
       cancelled = true
       clearInterval(rateId)
+      for (const c of controllers) c.stop()
+      controllers.length = 0
     }
   }, [])
 
   function togglePause() {
     setPaused((p) => {
       const next = !p
-      // Resume from each log's current head so a long pause doesn't replay a backlog.
-      if (!next) cursorsRef.current.clear()
-      else setRate(0)
+      if (next) setRate(0)
+      // Resume each log at its current tree head so a long pause doesn't replay a backlog.
+      else for (const c of controllersRef.current) c.reset()
       return next
     })
   }

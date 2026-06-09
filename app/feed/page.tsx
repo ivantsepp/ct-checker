@@ -4,7 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { CTLog } from '@/types/ct'
 import { getLogList } from '@/lib/log-list'
-import { pollOnce, selectFeedLogs, verifyHref, type FeedCert } from '@/lib/ct-feed'
+import {
+  streamLog,
+  selectFeedLogs,
+  verifyHref,
+  type FeedCert,
+  type LogStreamController,
+} from '@/lib/ct-feed'
 import NavBar from '@/components/NavBar'
 import FeedDrawer from '@/components/FeedDrawer'
 
@@ -12,8 +18,6 @@ type Status = 'idle' | 'poll' | 'ok' | 'err'
 
 const MAX_ROWS = 400
 const POLL_INTERVAL = 6000
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 function fmtTime(ts: number): string {
   return new Date(ts).toISOString().slice(11, 23) // HH:MM:SS.mmm
@@ -38,12 +42,13 @@ export default function FeedPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [rate, setRate] = useState(0)
   const [total, setTotal] = useState(0)
+  const [skipped, setSkipped] = useState(0)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // Refs read inside the long-lived poll loops (avoid stale closures).
   const pausedRef = useRef(false)
   const enabledRef = useRef<Record<string, boolean>>({})
-  const cursorsRef = useRef<Map<string, number | null>>(new Map())
+  const controllersRef = useRef<Map<string, LogStreamController>>(new Map())
   const seenRef = useRef<Set<string>>(new Set())
   const rateCounterRef = useRef(0)
 
@@ -83,29 +88,7 @@ export default function FeedPage() {
   // ── Boot the pollers ──────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
-
-    async function loop(log: CTLog) {
-      const name = log.description
-      while (!cancelled) {
-        if (pausedRef.current || !enabledRef.current[name]) {
-          await sleep(500)
-          continue
-        }
-        setStatus(name, 'poll')
-        try {
-          const cursor = cursorsRef.current.has(name) ? cursorsRef.current.get(name)! : null
-          const result = await pollOnce(log, cursor)
-          if (cancelled) return
-          cursorsRef.current.set(name, result.cursor)
-          pushCerts(result.certs)
-          setStatus(name, 'ok')
-        } catch {
-          if (cancelled) return
-          setStatus(name, 'err')
-        }
-        await sleep(POLL_INTERVAL)
-      }
-    }
+    const controllers = controllersRef.current
 
     ;(async () => {
       try {
@@ -126,7 +109,21 @@ export default function FeedPage() {
         enabledRef.current = initEnabled
         setEnabled(initEnabled)
         setStatuses(initStatus)
-        selected.forEach(loop)
+
+        for (const log of selected) {
+          const name = log.description
+          controllers.set(
+            log.description,
+            streamLog(log, {
+              pollInterval: POLL_INTERVAL,
+              // Idle while globally paused or this log is individually disabled.
+              isPaused: () => pausedRef.current || !enabledRef.current[name],
+              onStatus: (s) => setStatus(name, s),
+              onCerts: (c) => pushCerts(c),
+              onSkip: (n) => setSkipped((x) => x + n),
+            }),
+          )
+        }
       } catch (e) {
         if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e))
       }
@@ -134,6 +131,8 @@ export default function FeedPage() {
 
     return () => {
       cancelled = true
+      for (const c of controllers.values()) c.stop()
+      controllers.clear()
     }
   }, [setStatus, pushCerts])
 
@@ -141,9 +140,12 @@ export default function FeedPage() {
   function toggleLog(name: string) {
     setEnabled((prev) => {
       const next = { ...prev, [name]: !prev[name] }
-      // Re-enabling resumes from the current tree head, not a stale cursor.
-      if (next[name]) cursorsRef.current.delete(name)
-      else setStatus(name, 'idle')
+      if (next[name]) {
+        // Re-enabling resumes from the current tree head, not a stale cursor.
+        controllersRef.current.get(name)?.reset()
+      } else {
+        setStatus(name, 'idle')
+      }
       return next
     })
   }
@@ -159,8 +161,8 @@ export default function FeedPage() {
           return out
         })
       } else {
-        // Resume from each log's current head to avoid replaying a backlog.
-        cursorsRef.current.clear()
+        // Resume each log at its current tree head (no backlog replay, no skip).
+        for (const c of controllersRef.current.values()) c.reset()
       }
       return next
     })
@@ -228,6 +230,7 @@ export default function FeedPage() {
 
         <span className="text-xs text-slate-500 ml-auto whitespace-nowrap">
           {rate}/s · {total.toLocaleString()} seen
+          {skipped > 0 && ` · ${skipped.toLocaleString()} skipped`}
         </span>
         <input
           value={filter}

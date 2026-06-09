@@ -8,8 +8,14 @@
  * serve binary data tiles.  Per CLAUDE.md, the protocol is known up front from
  * `log.logType` — there is no runtime probing.
  *
- * Each `pollOnce` advances a per-log cursor by one batch and returns the certs
- * it decoded; the UI owns the loop, cursors, pause and per-log enable state.
+ * `streamLog` runs one self-contained loop per log: it seeds near the tree head,
+ * drains forward to the head (paginating by the server's per-response cap), then
+ * waits `pollInterval` before re-checking the head.  The signed tree head is
+ * fetched ONLY when the cursor has caught up to the last-known size — while a
+ * backlog remains we keep pulling entries without a redundant STH round-trip.
+ * If the log grows faster than we can drain (`treeSize - cursor > maxLag`), the
+ * cursor jumps to the head and the skipped count is reported, keeping the feed
+ * pinned to the live edge instead of falling ever further behind.
  */
 
 import type { CTLog } from '@/types/ct'
@@ -21,10 +27,21 @@ import { parseLeafCertFields } from './feed-cert'
 
 // ── Tuning ──────────────────────────────────────────────────────────────────
 
-/** RFC 6962 entries fetched per poll. */
-export const RFC6962_BATCH = 32
+/**
+ * RFC 6962 entries requested per `get-entries` call.  Logs cap how many they
+ * actually return (Google ≈ 32, others higher), so we request a wide window and
+ * advance the cursor by however many come back — extracting full throughput on
+ * high-cap logs while degrading gracefully on Google's.
+ */
+const REQUEST_WINDOW = 256
 /** Data-tile width (Sunlight): one tile = up to 256 entries. */
 const TILE_WIDTH = 256
+/** Entries kept when seeding at, or jumping to, the tree head. */
+const EDGE_WINDOW = 32
+/** Drain at most this many entries behind the head before jumping to it. */
+const DEFAULT_MAX_LAG = 256
+/** Wait between head checks once caught up (ms). */
+const DEFAULT_POLL_INTERVAL = 5000
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -56,12 +73,35 @@ export interface FeedCert {
   issuerDER?: Uint8Array
 }
 
-export interface PollResult {
+export type FeedStatus = 'poll' | 'ok' | 'err'
+
+export interface LogStreamOptions {
+  /** New certificates decoded this step (oldest-first). */
+  onCerts: (certs: FeedCert[]) => void
+  /** Poll lifecycle, for status dots. */
+  onStatus?: (status: FeedStatus) => void
+  /** Entries skipped because the log outran us (flood guard). */
+  onSkip?: (skipped: number) => void
+  /** Loop idles (no fetches) while this returns true. */
+  isPaused?: () => boolean
+  /** Wait between head checks once caught up (ms). */
+  pollInterval?: number
+  /** Drain at most this many entries behind the head before jumping to it. */
+  maxLag?: number
+}
+
+export interface LogStreamController {
+  /** Stop the loop permanently. */
+  stop: () => void
+  /** Re-seed at the current tree head on the next poll (no skip reported). */
+  reset: () => void
+}
+
+/** Result of fetching one batch from a log, given a known tree size. */
+interface BatchResult {
   certs: FeedCert[]
-  /** Next cursor (leaf index to resume from). */
+  /** Cursor after consuming this batch. */
   cursor: number
-  /** Current tree size reported by the log's STH / checkpoint. */
-  treeSize: number
 }
 
 // ── Binary helpers (big-endian) ────────────────────────────────────────────────
@@ -219,27 +259,39 @@ function issuerFromExtraData(extraData: Uint8Array): Uint8Array | undefined {
   return extraData.slice(p, p + certLen)
 }
 
-// ── Polling ───────────────────────────────────────────────────────────────────
+// ── Tree head ─────────────────────────────────────────────────────────────────
+
+/** Current tree size, via the protocol the log speaks. */
+async function fetchTreeSize(log: CTLog): Promise<number> {
+  const sth = log.logType === 'tiled'
+    ? await getSTHFromCheckpoint(log.url)
+    : await getSTH(log.url)
+  return sth.treeSize
+}
+
+// ── Batch fetch (one network step, given a known tree size) ─────────────────────
 
 /**
- * Fetch one batch of new entries from an RFC 6962 log.
- * `cursor === null` starts near the current tree head.
+ * Fetch one `get-entries` window from an RFC 6962 log starting at `cursor`.
+ * Advances the cursor by however many entries the log actually returned (it may
+ * cap below the requested window); returns the cursor unchanged on an empty
+ * response so the caller can detect lack of progress and back off.
  */
-async function pollRFC6962(log: CTLog, cursor: number | null): Promise<PollResult> {
-  const sth = await getSTH(log.url)
-  const treeSize = sth.treeSize
-  let start = cursor === null ? Math.max(0, treeSize - RFC6962_BATCH) : cursor
-  if (start >= treeSize) return { certs: [], cursor: start, treeSize }
-
-  const end = Math.min(start + RFC6962_BATCH - 1, treeSize - 1)
+async function fetchBatchRFC6962(
+  log: CTLog,
+  cursor: number,
+  treeSize: number,
+): Promise<BatchResult> {
+  const end = Math.min(cursor + REQUEST_WINDOW - 1, treeSize - 1)
   const { json } = await ctFetch(log.url, 'ct/v1/get-entries', {
-    start: String(start),
+    start: String(cursor),
     end: String(end),
   })
   const entries =
     (json as { entries?: Array<{ leaf_input: string; extra_data?: string }> }).entries ?? []
 
   const certs: FeedCert[] = []
+  let idx = cursor
   for (const entry of entries) {
     const leaf = parseMerkleLeaf(fromBase64(entry.leaf_input))
     if (leaf) {
@@ -249,48 +301,135 @@ async function pollRFC6962(log: CTLog, cursor: number | null): Promise<PollResul
         !leaf.isPrecert && entry.extra_data
           ? issuerFromExtraData(fromBase64(entry.extra_data))
           : undefined
-      const fc = toFeedCert(log.description, start, leaf, issuerDER)
+      const fc = toFeedCert(log.description, idx, leaf, issuerDER)
       if (fc) certs.push(fc)
     }
-    start++
+    idx++
   }
-  return { certs, cursor: start, treeSize }
+  return { certs, cursor: entries.length > 0 ? cursor + entries.length : cursor }
 }
 
 /**
- * Fetch one tile of new entries from a Sunlight / tiled log.
- * `cursor === null` starts near the current tree head.
+ * Fetch the data tile containing `cursor` from a Sunlight / tiled log and emit
+ * the entries at or after `cursor`.  Advances to the next tile boundary (or the
+ * head, for the last partial tile).
  */
-async function pollTiled(log: CTLog, cursor: number | null): Promise<PollResult> {
-  const sth = await getSTHFromCheckpoint(log.url)
-  const treeSize = sth.treeSize
-  const start = cursor === null ? Math.max(0, treeSize - 16) : cursor
-  if (start >= treeSize) return { certs: [], cursor: start, treeSize }
-
-  const tileIdx = Math.floor(start / TILE_WIDTH)
+async function fetchBatchTiled(
+  log: CTLog,
+  cursor: number,
+  treeSize: number,
+): Promise<BatchResult> {
+  const tileIdx = Math.floor(cursor / TILE_WIDTH)
   const tileStart = tileIdx * TILE_WIDTH
   const entriesInTile = Math.min(TILE_WIDTH, treeSize - tileStart)
   const isPartial = entriesInTile < TILE_WIDTH
-  const path = dataTilePath(tileIdx, isPartial ? entriesInTile : undefined)
 
-  const { bytes } = await ctFetch(log.url, path)
-  if (!bytes) return { certs: [], cursor: start, treeSize }
+  let bytes: Uint8Array | undefined
+  try {
+    bytes = (await ctFetch(log.url, dataTilePath(tileIdx, isPartial ? entriesInTile : undefined)))
+      .bytes
+  } catch (e) {
+    // Some logs serve partial tiles at the full-tile URL too — retry without .p
+    if (!isPartial) throw e
+    bytes = (await ctFetch(log.url, dataTilePath(tileIdx))).bytes
+  }
+  if (!bytes) return { certs: [], cursor }
 
   const raw = parseDataTileFeed(bytes, tileStart, treeSize)
   const certs: FeedCert[] = []
   for (const e of raw) {
-    if (e.index < start || e.index >= treeSize) continue
+    if (e.index < cursor || e.index >= treeSize) continue
     const fc = toFeedCert(log.description, e.index, e)
     if (fc) certs.push(fc)
   }
-  // Advance to the next unseen entry (next tile if we consumed this one).
-  const next = certs.length ? certs[certs.length - 1].index + 1 : tileStart + entriesInTile
-  return { certs, cursor: Math.max(start, next), treeSize }
+  return { certs, cursor: tileStart + entriesInTile }
 }
 
-/** Poll one batch from a log, dispatching on its declared protocol. */
-export function pollOnce(log: CTLog, cursor: number | null): Promise<PollResult> {
-  return log.logType === 'tiled' ? pollTiled(log, cursor) : pollRFC6962(log, cursor)
+function fetchBatch(log: CTLog, cursor: number, treeSize: number): Promise<BatchResult> {
+  return log.logType === 'tiled'
+    ? fetchBatchTiled(log, cursor, treeSize)
+    : fetchBatchRFC6962(log, cursor, treeSize)
+}
+
+// ── Per-log stream loop ─────────────────────────────────────────────────────
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Run a self-contained polling loop for one log until `stop()` is called.
+ * See the module header for the drain-to-head / flood-guard strategy.
+ */
+export function streamLog(log: CTLog, opts: LogStreamOptions): LogStreamController {
+  const pollInterval = opts.pollInterval ?? DEFAULT_POLL_INTERVAL
+  const maxLag = opts.maxLag ?? DEFAULT_MAX_LAG
+  const isPaused = opts.isPaused ?? (() => false)
+
+  let cancelled = false
+  let reseed = false
+  let cursor: number | null = null
+  let knownTreeSize: number | undefined
+
+  ;(async () => {
+    while (!cancelled) {
+      if (isPaused()) {
+        await sleep(250)
+        continue
+      }
+      if (reseed) {
+        cursor = null
+        knownTreeSize = undefined
+        reseed = false
+      }
+
+      opts.onStatus?.('poll')
+      try {
+        // Fetch the signed tree head ONLY when we've drained the known backlog.
+        if (cursor === null || knownTreeSize === undefined || cursor >= knownTreeSize) {
+          knownTreeSize = await fetchTreeSize(log)
+        }
+        if (cancelled) return
+        const treeSize = knownTreeSize
+
+        // First poll: seed a small recent window rather than the whole log.
+        if (cursor === null) cursor = Math.max(0, treeSize - EDGE_WINDOW)
+
+        // Flood guard: too far behind the head → jump to it and report the gap.
+        if (treeSize - cursor > maxLag) {
+          const target = Math.max(0, treeSize - EDGE_WINDOW)
+          if (target > cursor) {
+            opts.onSkip?.(target - cursor)
+            cursor = target
+          }
+        }
+
+        const before = cursor
+        if (cursor < treeSize) {
+          const res = await fetchBatch(log, cursor, treeSize)
+          if (cancelled) return
+          cursor = res.cursor
+          if (res.certs.length) opts.onCerts(res.certs)
+        }
+        opts.onStatus?.('ok')
+
+        // Made progress and still behind → keep draining without re-checking the
+        // head (no STH fetch, since cursor < knownTreeSize) and without waiting.
+        if (cursor > before && cursor < knownTreeSize) continue
+      } catch {
+        if (cancelled) return
+        opts.onStatus?.('err')
+      }
+      await sleep(pollInterval)
+    }
+  })()
+
+  return {
+    stop() {
+      cancelled = true
+    },
+    reset() {
+      reseed = true
+    },
+  }
 }
 
 // ── Log selection ───────────────────────────────────────────────────────────
