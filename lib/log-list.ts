@@ -48,12 +48,39 @@ function normalizeInterval(
 }
 
 /**
+ * CT logs we trust that are NOT in the Chrome v3 log list.
+ *
+ * Chrome's list only covers logs in scope for its TLS-server-cert CT policy.
+ * BIMI / VMC (Verified Mark Certificate) SCTs are logged to a separate set of
+ * CT logs operated by the Mark Verifying Authorities. The canonical list is
+ * published by the AuthIndicators Working Group via crt.sh:
+ *   https://github.com/crtsh/ctloglists — files/bimi/v3/approved_logs_list.json
+ *
+ * As of mid-2026 the only BIMI log operator is DigiCert ("Gorgon"). Pinning the
+ * key here lets gorgon SCT signatures verify and inclusion proofs resolve just
+ * like any Chrome-listed RFC 6962 log. (Independently confirmed: this key's
+ * SHA-256 matches the log_id, and it is one of the two ECDSA candidates
+ * recovered from the live /ct/v1/get-sth signature.)
+ */
+export const EXTRA_LOGS: CTLog[] = [
+  {
+    description: 'DigiCert Gorgon',
+    logId: 'VVlTrjCWAIBs0utSCKbJnpMYKKwQVrRCHFU2FUxfdaw=',
+    key: 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbEiWluJDIqWi8JbeCSfR3V2k/a5s9XtZv+HU5u/gU9NSYnWGwEoEW6IK7n6LehfrJL3znCUAC0ayEaeiFQuibA==',
+    url: 'https://gorgon.ct.digicert.com/log/',
+    state: { usable: { timestamp: '2021-07-09T00:00:00Z' } },
+    operator: 'DigiCert',
+    logType: 'rfc6962',
+  },
+]
+
+/**
  * Normalize the raw Chrome v3 log list into our internal `CTLog[]` shape.
  * Used both by the server-side `/api/log-list` route and by the static-mode
  * client which fetches gstatic.com directly.
  */
 export function normalizeLogList(raw: RawLogListV3): CTLog[] {
-  return raw.operators.flatMap((op) => {
+  const fromChrome = raw.operators.flatMap((op) => {
     const rfc6962 = (op.logs ?? []).map((log) => ({
       description: log.description,
       logId: log.log_id,
@@ -82,6 +109,11 @@ export function normalizeLogList(raw: RawLogListV3): CTLog[] {
 
     return [...rfc6962, ...tiled]
   })
+
+  // Append trusted non-Chrome logs (e.g. BIMI/VMC), skipping any that Chrome
+  // happens to also list so a future migration doesn't create duplicates.
+  const seen = new Set(fromChrome.map((l) => l.logId))
+  return [...fromChrome, ...EXTRA_LOGS.filter((l) => !seen.has(l.logId))]
 }
 
 export async function getLogList(): Promise<CTLog[]> {

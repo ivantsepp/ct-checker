@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { withCors, preflight } from '@/lib/cors'
+import { EXTRA_LOGS } from '@/lib/log-list'
 
 const LOG_LIST_URL = 'https://www.gstatic.com/ct/log_list/v3/log_list.json'
 let knownLogUrls: Set<string> | null = null
@@ -28,6 +29,12 @@ async function getKnownLogUrls(): Promise<Set<string>> {
       urls.push(l.monitoring_url.replace(/\/$/, ''))
       urls.push(l.submission_url.replace(/\/$/, ''))
     }
+  }
+
+  // Trusted logs not in Chrome's list (e.g. BIMI/VMC) — keep the allowlist in
+  // sync with normalizeLogList so the proxy will forward to them.
+  for (const l of EXTRA_LOGS) {
+    urls.push(l.url.replace(/\/$/, ''))
   }
 
   knownLogUrls = new Set(urls)
