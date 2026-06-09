@@ -4,15 +4,22 @@
  *
  *   node update-cors-operators.mjs
  *
- * For each operator in the Chrome v3 CT log list, this probes a representative
- * usable log's read endpoint (RFC 6962 `ct/v1/get-sth` or Sunlight
- * `/checkpoint`) with an `Origin` header and inspects the response's
- * `Access-Control-Allow-Origin`.  CORS support is an operator-infrastructure
- * property, so one verdict is recorded per operator:
+ * For each operator in the Chrome v3 CT log list, this probes a usable log's
+ * read endpoints with an `Origin` header and inspects each response's
+ * `Access-Control-Allow-Origin`.  CORS can differ PER ENDPOINT on the same log
+ * (e.g. DigiCert serves CORS on `ct/v1/get-sth` but NOT on `ct/v1/get-entries`),
+ * so we test the endpoints the feed actually depends on to read entries and
+ * require ALL of them to serve CORS:
  *
- *   - "ok"      → at least one of the operator's logs returned a usable ACAO
- *                 (`*` or our origin), so a browser can read it directly.
- *   - "blocked" → logs responded but none sent a usable ACAO.
+ *   - RFC 6962 logs:  `ct/v1/get-sth` AND `ct/v1/get-entries`
+ *   - Sunlight logs:  `checkpoint`   AND `tile/data/000`
+ *
+ * CORS support is otherwise an operator-infrastructure property, so one verdict
+ * is recorded per operator:
+ *
+ *   - "ok"      → at least one of the operator's logs serves CORS on ALL its
+ *                 required read endpoints, so a browser can run the feed on it.
+ *   - "blocked" → logs responded but none served CORS on every endpoint.
  *   - (omitted) → no log responded (network error / all unreachable) → unknown.
  *
  * Only the block between the `cors-operators:begin/end` markers is rewritten;
@@ -45,7 +52,7 @@ function isUsable(log) {
   return (!Number.isFinite(start) || now >= start) && (!Number.isFinite(end) || now < end)
 }
 
-/** Fetch a read endpoint with an Origin header; true if it serves a usable ACAO. */
+/** Fetch one endpoint with an Origin header; true if it serves a usable ACAO. */
 async function servesCors(url) {
   const res = await fetch(url, {
     headers: { Origin: ORIGIN, 'User-Agent': 'ct-checker-cors-probe/1.0 (ivan.tse1@gmail.com)' },
@@ -56,17 +63,34 @@ async function servesCors(url) {
   return acao === '*' || acao === ORIGIN
 }
 
-/** Probe an operator's logs until one is CORS-ok, else 'blocked' / undefined. */
-async function probeOperator(name, endpoints) {
-  let anyResponded = false
-  for (const url of endpoints.slice(0, MAX_PROBES_PER_OPERATOR)) {
+/**
+ * Probe a single log across all the endpoints the feed needs.
+ *   'ok'          → every endpoint responded with a usable ACAO
+ *   'blocked'     → some endpoint responded without CORS
+ *   'unreachable' → an endpoint errored, so we can't confirm full support
+ */
+async function probeLog(endpoints) {
+  let responded = false
+  for (const url of endpoints) {
+    let cors
     try {
-      const ok = await servesCors(url)
-      anyResponded = true
-      if (ok) return 'ok'
+      cors = await servesCors(url)
     } catch {
-      // network error / timeout — try the next log
+      return 'unreachable'
     }
+    responded = true
+    if (!cors) return 'blocked' // CORS missing on a required endpoint
+  }
+  return responded ? 'ok' : 'unreachable'
+}
+
+/** Probe an operator's logs until one is fully CORS-ok, else 'blocked' / undefined. */
+async function probeOperator(name, logs) {
+  let anyResponded = false
+  for (const endpoints of logs.slice(0, MAX_PROBES_PER_OPERATOR)) {
+    const result = await probeLog(endpoints)
+    if (result === 'ok') return 'ok'
+    if (result === 'blocked') anyResponded = true
   }
   return anyResponded ? 'blocked' : undefined
 }
@@ -85,26 +109,31 @@ async function main() {
   if (!res.ok) throw new Error(`log list fetch failed: ${res.status}`)
   const list = await res.json()
 
-  // operator name → list of read-endpoint URLs (one per usable log)
-  const endpointsByOperator = new Map()
-  const add = (op, url) => {
-    if (!endpointsByOperator.has(op)) endpointsByOperator.set(op, [])
-    endpointsByOperator.get(op).push(url)
+  // operator name → list of logs, each a list of the read endpoints the feed
+  // depends on (all must serve CORS for the log to be usable in the browser).
+  const logsByOperator = new Map()
+  const addLog = (op, endpoints) => {
+    if (!logsByOperator.has(op)) logsByOperator.set(op, [])
+    logsByOperator.get(op).push(endpoints)
   }
   for (const op of list.operators) {
     for (const log of op.logs ?? []) {
-      if (isUsable(log)) add(op.name, trailingSlash(log.url) + 'ct/v1/get-sth')
+      if (!isUsable(log)) continue
+      const base = trailingSlash(log.url)
+      addLog(op.name, [base + 'ct/v1/get-sth', base + 'ct/v1/get-entries?start=0&end=0'])
     }
     for (const log of op.tiled_logs ?? []) {
-      if (isUsable(log)) add(op.name, trailingSlash(log.monitoring_url) + 'checkpoint')
+      if (!isUsable(log)) continue
+      const base = trailingSlash(log.monitoring_url)
+      addLog(op.name, [base + 'checkpoint', base + 'tile/data/000'])
     }
   }
 
-  console.log(`Probing ${endpointsByOperator.size} operators (origin: ${ORIGIN})…\n`)
+  console.log(`Probing ${logsByOperator.size} operators (origin: ${ORIGIN})…\n`)
   const verdicts = {}
   await Promise.all(
-    [...endpointsByOperator].map(async ([name, endpoints]) => {
-      const verdict = await probeOperator(name, endpoints)
+    [...logsByOperator].map(async ([name, logs]) => {
+      const verdict = await probeOperator(name, logs)
       if (verdict) verdicts[name] = verdict
       const mark = verdict === 'ok' ? '✓ ok' : verdict === 'blocked' ? '✗ blocked' : '· unknown (skipped)'
       console.log(`  ${name.padEnd(20)} ${mark}`)
